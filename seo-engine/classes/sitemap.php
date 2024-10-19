@@ -38,14 +38,23 @@ class Meow_MWSEO_Sitemap extends WP_Sitemaps_Provider
       2
      );
 
-    //Exclude Post Types
-    $excluded_post_types = $this->core->get_option( 'seo_engine_sitemap_excluded_post_types', [] );
-    add_filter( 
-      'wp_sitemaps_post_types',
-      function ( $post_types ) use ( $excluded_post_types ) {
-        return array_values( array_diff( $post_types, $excluded_post_types ) );
-      }
-     );
+    // Exclude Post Types
+    $excluded_post_types = $this->core->get_option('seo_engine_sitemap_excluded_post_types', []);
+    
+    
+    add_filter(
+        'wp_sitemaps_post_types',
+        function ($post_types) use ($excluded_post_types) {
+            foreach ($excluded_post_types as $excluded_post_type) {
+                if (isset($post_types[$excluded_post_type])) {
+                    unset($post_types[$excluded_post_type]);
+                }
+            }
+            return $post_types;
+        },
+        10,
+        1
+    );
 
     //Exclude Taxonomies
     $excluded_taxonomies = $this->core->get_option( 'seo_engine_sitemap_excluded_taxonomies', [] );
