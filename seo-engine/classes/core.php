@@ -57,6 +57,11 @@ class Meow_MWSEO_Core
 		if ( $this->get_option( 'seo_engine_woocommerce_assistant', false ) ) {
 			add_action( 'add_meta_boxes', array( $this, 'add_wc_meta_boxes' ) );
 		}
+
+		// Advanced Core
+		if ( class_exists( 'MeowPro_MWSEO_Core' ) ) {
+			new MeowPro_MWSEO_Core( $this );
+		}
 	}
 
 	function get_logs() {
@@ -861,10 +866,6 @@ class Meow_MWSEO_Core
 		if ( $options['seo_engine_disable_wp_sitemap'] ) {
 
 		}
-
-		// (HIDE) Temporary disable the Search Engine related features
-		$options['seo_engine_google_ranking'] = false;
-		$options['seo_engine_ai_web_scraping'] = false;
 
 		$options = $this->update_options( $options );
 
