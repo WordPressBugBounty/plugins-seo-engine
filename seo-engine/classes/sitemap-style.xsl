@@ -1,154 +1,224 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<xsl:stylesheet version="2.0" xmlns:xsl="http://www.w3.org/1999/XSL/Transform" xmlns:sm="http://www.sitemaps.org/schemas/sitemap/0.9">
+<xsl:stylesheet 
+    version="2.0" 
+    xmlns:xsl="http://www.w3.org/1999/XSL/Transform"
+    xmlns:sm="http://www.sitemaps.org/schemas/sitemap/0.9">
+
   <xsl:output method="html" version="1.0" encoding="UTF-8" indent="yes"/>
-  
+
+  <!-- 
+    Main template that checks the root element. 
+    We do an <xsl:choose> to see if it's <sitemapindex> or <urlset>.
+  -->
   <xsl:template match="/">
     <html>
       <head>
         <title>Sitemap</title>
         <style>
           /* Global Styles */
-body {
-  font-family: 'Roboto', sans-serif;
-  background-color: #f5f5f5;
-  color: #333;
-  margin: 0;
-  padding: 0;
-}
+          body {
+            font-family: 'Roboto', sans-serif;
+            background-color: #f5f5f5;
+            color: #333;
+            margin: 0;
+            padding: 0;
+          }
 
-/* Header Styles */
-h1 {
-  font-size: 36px;
-  font-weight: 700;
-  text-align: center;
-  margin-top: 60px;
-  margin-bottom: 40px;
-  color: #1e88e5;
-}
+          /* Header Styles */
+          h1 {
+            font-size: 36px;
+            font-weight: 700;
+            text-align: center;
+            margin-top: 60px;
+            margin-bottom: 40px;
+            color: #1e88e5;
+          }
 
-p {
-  font-size: 18px;
-  text-align: center;
-  margin-bottom: 50px;
-  color: #616161;
-}
+          p {
+            font-size: 18px;
+            text-align: center;
+            margin-bottom: 50px;
+            color: #616161;
+          }
 
-/* Table Styles */
-table {
-  border: none;
-  border-spacing: 0;
-  border-collapse: collapse;
-  background: white;
-  border-radius: 6px;
-  overflow: hidden;
-  max-width: 800px;
-  width: 100%;
-  margin: 0 auto;
-  position: relative;
-  box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
-}
+          /* Table Styles */
+          table {
+            border: 1px solid #eee;
+            border-spacing: 0;
+            border-collapse: collapse;
+            background: white;
+            border-radius: 6px;
+            overflow: hidden;
+            max-width: 800px;
+            width: 100%;
+            margin: 0 auto 60px;
+            position: relative;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+            table-layout: fixed; /* so we can define fixed widths for columns if needed */
+          }
 
-table * {
-  position: relative;
-}
+          table thead tr {
+            height: 60px;
+            background: #1e88e5;
+            font-size: 16px;
+            font-weight: 700;
+            color: #fff;
+          }
 
-table td, table th {
-  padding-left: 8px;
-}
+          table tbody tr {
+            height: 48px;
+            border-bottom: 1px solid #E3F1D5;
+            transition: background-color 0.3s ease;
+          }
 
-table thead tr {
-  height: 60px;
-  background: #1e88e5;
-  font-size: 16px;
-  font-weight: 700;
-  color: #fff;
-}
+          /* Hover and Alternating Rows */
+          table tbody tr:hover {
+            background-color: #eaeaea;
+          }
+          table tbody tr:nth-child(even) {
+            background-color: #fafafa;
+          }
 
-table tbody tr {
-  height: 48px;
-  border-bottom: 1px solid #E3F1D5;
-  transition: background-color 0.3s ease;
-}
+          table th,
+          table td {
+            text-align: left;
+            padding: 12px 8px;
+            font-size: 17px;
+          }
 
-table tbody tr:hover {
-  background-color: #f0f0f0;
-}
+          /* Give the URL column more space (if desired) */
+          table th:nth-child(2), 
+          table td:nth-child(2) {
+            width: 50%;
+            word-wrap: break-word;
+          }
 
-table tbody tr:last-child {
-  border: 0;
-}
+          /* Responsive Styles */
+          @media screen and (max-width: 35.5em) {
+            table {
+              display: block;
+              overflow: auto;
+            }
 
-table td, table th {
-  text-align: left;
-}
+            table > *, 
+            table tr, 
+            table td, 
+            table th {
+              display: block;
+            }
 
-table td.l {
-  text-align: right;
-}
+            table thead {
+              display: none;
+            }
 
-table td.c {
-  text-align: center;
-}
+            table tbody tr {
+              height: auto;
+              padding: 8px 0;
+            }
 
-table td.r {
-  text-align: center;
-}
+            table tbody tr td {
+              padding-left: 45%;
+              margin-bottom: 12px;
+            }
 
-/* Responsive Styles */
-@media screen and (max-width: 35.5em) {
-  table {
-    display: block;
-  }
-
-  table > *, table tr, table td, table th {
-    display: block;
-  }
-
-  table thead {
-    display: none;
-  }
-
-  table tbody tr {
-    height: auto;
-    padding: 8px 0;
-  }
-
-  table tbody tr td {
-    padding-left: 45%;
-    margin-bottom: 12px;
-  }
-
-  table tbody tr td:before {
-    content: attr(data-label);
-    display: inline-block;
-    font-weight: bold;
-    margin-left: -45%;
-    width: 40%;
-  }
-}
+            table tbody tr td:before {
+              content: attr(data-label);
+              display: inline-block;
+              font-weight: bold;
+              margin-left: -45%;
+              width: 40%;
+            }
+          }
         </style>
       </head>
       <body>
-        <h1>Sitemap 🗺️</h1>
-        <p>This is a sitemap generated by SEO Engine. 😽</p>
-        <table border="1">
-          <tr>
-            <th>#</th>
-            <th>URL</th>
-            <th>Priority</th>
-            <th>Change Frequency</th>
-            <th>Last Modified</th>
-          </tr>
-          <xsl:for-each select="sm:urlset/sm:url">
-            <tr>
-              <td><xsl:value-of select="position()"/></td>
-              <td><a href="{sm:loc}"><xsl:value-of select="sm:loc"/></a></td>
-              <td><xsl:value-of select="sm:priority"/></td>
-              <td><xsl:value-of select="sm:changefreq"/></td>
-              <td><xsl:value-of select="sm:lastmod"/></td>
-            </tr>
-          </xsl:for-each>
-        </table>
+        <xsl:choose>
+          <!-- If root element is sitemapindex -->
+          <xsl:when test="sm:sitemapindex">
+            <h1>Sitemap Index 🗺️</h1>
+            <p>This is a sitemap index generated by SEO Engine. 😽</p>
+            <table border="1">
+              <thead>
+                <tr>
+                  <th>#</th>
+                  <th>Loc</th>
+                  <th>Last Modified</th>
+                </tr>
+              </thead>
+              <tbody>
+                <xsl:for-each select="sm:sitemapindex/sm:sitemap">
+                  <tr>
+                    <td data-label="#">
+                      <xsl:value-of select="position()"/>
+                    </td>
+                    <td data-label="Loc">
+                      <a href="{sm:loc}">
+                        <xsl:value-of select="sm:loc"/>
+                      </a>
+                    </td>
+                    <!-- Some sitemaps may not have lastmod; show if it exists -->
+                    <td data-label="Last Modified">
+                      <xsl:choose>
+                        <xsl:when test="sm:lastmod">
+                          <xsl:value-of select="sm:lastmod"/>
+                        </xsl:when>
+                        <xsl:otherwise>
+                          <xsl:text>—</xsl:text>
+                        </xsl:otherwise>
+                      </xsl:choose>
+                    </td>
+                  </tr>
+                </xsl:for-each>
+              </tbody>
+            </table>
+          </xsl:when>
+
+          <!-- If root element is urlset -->
+          <xsl:when test="sm:urlset">
+            <h1>Sitemap 🗺️</h1>
+            <p>This is a sitemap generated by SEO Engine. 😽</p>
+            <table border="1">
+              <thead>
+                <tr>
+                  <th>#</th>
+                  <th>URL</th>
+                  <th>Priority</th>
+                  <th>Change Frequency</th>
+                  <th>Last Modified</th>
+                </tr>
+              </thead>
+              <tbody>
+                <xsl:for-each select="sm:urlset/sm:url">
+                  <tr>
+                    <td data-label="#">
+                      <xsl:value-of select="position()"/>
+                    </td>
+                    <td data-label="URL">
+                      <a href="{sm:loc}">
+                        <xsl:value-of select="sm:loc"/>
+                      </a>
+                    </td>
+                    <td data-label="Priority">
+                      <xsl:value-of select="sm:priority"/>
+                    </td>
+                    <td data-label="Change Frequency">
+                      <xsl:value-of select="sm:changefreq"/>
+                    </td>
+                    <td data-label="Last Modified">
+                      <xsl:value-of select="sm:lastmod"/>
+                    </td>
+                  </tr>
+                </xsl:for-each>
+              </tbody>
+            </table>
+          </xsl:when>
+
+          <!-- Otherwise, we don't recognize the root element -->
+          <xsl:otherwise>
+            <h1>Unknown Sitemap Format</h1>
+            <p>We couldn’t find a <code>urlset</code> or <code>sitemapindex</code> root element.</p>
+          </xsl:otherwise>
+        </xsl:choose>
       </body>
     </html>
   </xsl:template>

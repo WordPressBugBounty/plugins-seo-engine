@@ -202,6 +202,22 @@ class Meow_MWSEO_Core
 		return $list;
 	}
 
+	function get_taxonomies() {
+		$taxonomies = get_taxonomies( array( 'public' => true ), 'objects' );
+		$taxonomies = array_filter( $taxonomies, function( $taxonomy ) {
+			return !in_array( $taxonomy->name, [ 'nav_menu', 'link_category', 'post_format' ] );
+		} );
+		return $taxonomies;
+	}
+
+	function make_taxonomy_list( $taxonomies ) {
+		$list = [];
+		foreach ( $taxonomies as $taxonomy ) {
+			$list[$taxonomy->name] = $taxonomy->label;
+		}
+		return $list;
+	}	
+
 	function check_title_duplicates($title, $id) {
 		$duplicate_hashes = get_option( 'seo_engine_title_hashes' );
 		if ( empty( $duplicate_hashes ) ) {
@@ -880,6 +896,7 @@ class Meow_MWSEO_Core
 			'seo_engine_posts_limit' => 10,
 			'seo_engine_post_types' => $this->make_post_type_list( $this->get_post_types() ),
 			'seo_engine_select_post_types' => ['post'],
+			
 
 			//PREFERENCES
 			'seo_engine_readability_treshold' => 50,
@@ -894,13 +911,16 @@ class Meow_MWSEO_Core
 			//SITEMAP
 			'seo_engine_sitemap' => false,
 			'seo_engine_disable_wp_sitemap' => false,
+			'seo_engine_sitemap_custom' => false,
 			'seo_engine_sitemap_exclude_users_provider' => false,
 			'seo_engine_sitemap_exclude_posts_provider' => false,
 			'seo_engine_sitemap_exclude_taxonomies_provider' => false,
 			'seo_engine_sitemap_excluded_post_types' => [],
 			'seo_engine_sitemap_excluded_taxonomies' => [],
 			'seo_engine_sitemap_excluded_post_ids' => [],
-
+			'seo_engine_taxonomies' => $this->make_taxonomy_list( $this->get_taxonomies() ),
+			'seo_engine_sitemap_max_urls' => 100,
+			'seo_engine_sitemap_post_max_pages' => 100,
 
 			//SNS
 			'seo_engine_social_networks' => false,
