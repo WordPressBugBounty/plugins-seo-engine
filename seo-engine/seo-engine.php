@@ -3,7 +3,7 @@
 Plugin Name: SEO Engine
 Plugin URI: https://meowapps.com
 Description: SEO Engine is built for the AI-driven future. Create quality content, and we handle the SEO. Simple, neat, and hassle-free!
-Version: 0.3.6
+Version: 0.3.7
 Author: Jordy Meow
 Author URI: https://jordymeow.com
 Text Domain: seo-engine
@@ -13,7 +13,7 @@ http://www.opensource.org/licenses/mit-license.php
 http://www.gnu.org/licenses/gpl.html
 */
 
-define( 'SEOENGINE_VERSION', '0.3.6' );
+define( 'SEOENGINE_VERSION', '0.3.7' );
 define( 'SEOENGINE_PREFIX', 'mwseo' );
 define( 'SEOENGINE_DOMAIN', 'seo-engine' );
 define( 'SEOENGINE_ENTRY', __FILE__ );

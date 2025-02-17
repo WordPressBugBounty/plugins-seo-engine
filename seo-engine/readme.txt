@@ -4,7 +4,7 @@ Tags: seo, ai, google, search, optimization
 Donate link: https://www.patreon.com/meowapps
 Requires at least: 6.0
 Tested up to: 6.7
-Stable tag: 0.3.6
+Stable tag: 0.3.7
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -58,11 +58,15 @@ Nothing yet.
 
 == Changelog ==
 
+= 0.3.7 (2025/02/17) =
+* Add: Added documentation and refactored settings tabs for better organization.
+* Fix: Corrected language input handling in the WooCommerce helper.
+* ✨ Please leave a nice review for [SEO Engine on WordPress](https://wordpress.org/support/plugin/seo-engine/reviews/#new-post). That will help a lot, thank you! 💖
+
 = 0.3.6 (2025/01/15) =
 * Add: Better sitemap than the core WordPress one.
 * Add: New features in the UI to ease the SEO process.
 * Fix: Minor issues.
-* ✨ Please leave a nice review for [SEO Engine on WordPress](https://wordpress.org/support/plugin/seo-engine/reviews/#new-post). That will help a lot, thank you! 💖
 
 = 0.3.5 (2025/01/04) =
 * Update: Enhanced the UI.
