@@ -34,6 +34,30 @@ class Meow_MWSEO_Admin extends MeowCommon_Admin {
 		}
 
 		add_action( 'wp_head', array( $this, 'seo_engine_headers' ) );
+		add_action( 'wp_head', array( $this, 'seo_engine_sitemap_headers' ) );
+	}
+
+	function seo_engine_sitemap_headers( $headers ) {
+
+		$disabled = $this->core->get_option( 'seo_engine_disable_wp_sitemap', false );
+   		$custom   = $this->core->get_option( 'seo_engine_sitemap_custom', false );
+
+		if( $disabled && !$custom ) {
+			return $headers;
+		}
+
+		$excluded_posts = $this->core->get_option( 'seo_engine_sitemap_excluded_post_ids', [] );
+		$excluded_posts = array_map( 'intval', $excluded_posts );
+		$post_id = get_the_ID();
+
+		if( !in_array( $post_id, $excluded_posts ) ) {
+			return $headers;
+		}
+
+		echo '<!-- SEO Engine: This post is excluded from the sitemap -->';
+		echo '<meta name="robots" content="noindex, follow">';
+		
+		return $headers;
 	}
 
 	function seo_engine_headers( $headers ) {

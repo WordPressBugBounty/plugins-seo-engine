@@ -3,8 +3,8 @@ Contributors: TigrouMeow
 Tags: seo, ai, google, search, optimization
 Donate link: https://www.patreon.com/meowapps
 Requires at least: 6.0
-Tested up to: 6.7
-Stable tag: 0.3.7
+Tested up to: 6.8
+Stable tag: 0.3.8
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -57,6 +57,14 @@ Replace all the files. Nothing else to do.
 Nothing yet.
 
 == Changelog ==
+
+= 0.3.8 (2025/05/01) =
+* Fix: Allowed saving even when no posts are selected.
+* Fix: Resolved an issue where search was interfering with selected posts.
+* Add: Excluded posts from sitemaps are now properly marked as noindex; also added a post selector.
+* Update: Improved language selection by displaying language names in SEO settings.
+* Add: Added compatibility with Polylang, including post filtering and automatic AI language setting.
+* Add: Introduced a legend for SE Search icons to improve usability.
 
 = 0.3.7 (2025/02/17) =
 * Add: Added documentation and refactored settings tabs for better organization.

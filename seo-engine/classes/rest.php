@@ -30,6 +30,16 @@ class Meow_MWSEO_Rest
 				'permission_callback' => array( $this->core, 'can_access_features' ),
 				'callback' => array( $this, 'rest_clear_logs' )
 			) );
+			register_rest_route( $this->namespace, '/fetch_posts', array(
+				'methods' => 'POST',
+				'permission_callback' => array( $this->core, 'can_access_features' ),
+				'callback' => array( $this, 'rest_fetch_posts' ),
+				'args' => array(
+					'search' => array( 'required' => false ),
+					'offset' => array( 'required' => false, 'default' => 0 ),
+					'limit' => array( 'required' => false, 'default' => 10 ),
+				)
+			) );
 
 			// SETTINGS
 			register_rest_route( $this->namespace, '/settings/update', array(
@@ -147,6 +157,13 @@ class Meow_MWSEO_Rest
 				'permission_callback' => array( $this->core, 'can_access_settings' ),
 				'callback' => array( $this, 'rest_ai_magic_fix_new_suggestion' )
 			) );
+			
+			// Languages
+			register_rest_route( $this->namespace, '/get_languages', array(
+				'methods' => 'GET',
+				'permission_callback' => array( $this->core, 'can_access_settings' ),
+				'callback' => array( $this, 'rest_get_languages' )
+			) );
 		}
 		catch (Exception $e) {
 			var_dump($e);
@@ -248,6 +265,12 @@ class Meow_MWSEO_Rest
 		$search = isset($params['search']) ? $params['search'] : null;
 		$filter = isset($params['filterBy']) ? $params['filterBy'] : null;
 		$filter = $filter == 'all' ? null : $filter;
+		
+		// Get language filter
+		$language = isset($params['language']) ? $params['language'] : null;
+		if (empty($language) || $language === 'all') {
+			$language = get_option('seo_kiss_options', null)['seo_engine_default_language'] ?? 'all';
+		}
 	
 		$total_counts = [
 			'pending' => 0,
@@ -276,6 +299,18 @@ class Meow_MWSEO_Rest
 				],
 			],
 		];
+		
+		// Add language filter if Polylang is active and a specific language is selected
+		if (function_exists('pll_get_post_language') && $language !== 'all') {
+			// Set the language taxonomy query for Polylang
+			$args['tax_query'] = [
+				[
+					'taxonomy' => 'language',
+					'field'    => 'slug',
+					'terms'    => $language,
+				],
+			];
+		}
 	
 		if ($search) {
 			$args['s'] = $search; // Search in post title and content
@@ -318,6 +353,7 @@ class Meow_MWSEO_Rest
 				'rendered_title' => $this->core->build_title($post),
 				'rendered_excerpt' => $this->core->build_excerpt($post),
 				'post_type' => $post->post_type,
+				'language' => function_exists('pll_get_post_language') ? pll_get_post_language($post->ID, 'slug') : null,
 			];
 		}
 	
@@ -334,12 +370,25 @@ class Meow_MWSEO_Rest
 
 	function rest_get_all_ids() {
 		$post_type = get_option('seo_kiss_options', null)['seo_engine_default_post_type'] ?? 'post';
+		$language = get_option('seo_kiss_options', null)['seo_engine_default_language'] ?? 'all';
 	
 		$args = [
 			'post_type' => $post_type,
 			'posts_per_page' => -1, // Get all posts
 			'fields' => 'ids',
 		];
+		
+		// Add language filter if Polylang is active and a specific language is selected
+		if (function_exists('pll_get_post_language') && $language !== 'all') {
+			// Set the language taxonomy query for Polylang
+			$args['tax_query'] = [
+				[
+					'taxonomy' => 'language',
+					'field'    => 'slug',
+					'terms'    => $language,
+				],
+			];
+		}
 	
 		$query = new WP_Query($args);
 		$posts = $query->posts; // Get all posts
@@ -518,6 +567,66 @@ class Meow_MWSEO_Rest
 		}
 		else {
 			delete_post_meta( $post_id, $meta_key, $meta_value );
+		}
+	}
+
+	function rest_fetch_posts( $request ) {
+		try {
+			$params = $request->get_json_params();
+			$search = isset($params['search']) ? $params['search'] : '';
+			$offset = isset($params['offset']) ? intval($params['offset']) : 0;
+			$limit = isset($params['limit']) ? intval($params['limit']) : 10;
+
+			global $wpdb;
+			$searchPlaceholder = $search ? '%' . $search . '%' : '';
+			$where_search_clause = $search ? $wpdb->prepare(
+				"AND ( p.post_title LIKE %s OR p.post_content LIKE %s OR p.post_name LIKE %s ) ",
+				$searchPlaceholder,
+				$searchPlaceholder,
+				$searchPlaceholder
+			) : '';
+
+			$posts = $wpdb->get_results(
+				$wpdb->prepare(
+					"SELECT p.ID, p.post_title, p.post_date, p.post_status, u.display_name as author
+					FROM $wpdb->posts p 
+					LEFT JOIN $wpdb->users u ON p.post_author = u.ID
+					WHERE p.post_type = 'post' 
+					AND p.post_status IN ('publish', 'draft', 'private')
+					$where_search_clause 
+					ORDER BY p.post_date DESC 
+					LIMIT %d, %d", 
+					$offset, 
+					$limit
+				), 
+				OBJECT
+			);
+
+			$posts_count = (int)$wpdb->get_var(
+				"SELECT COUNT(*)
+				FROM $wpdb->posts p 
+				WHERE p.post_type = 'post' 
+				AND p.post_status IN ('publish', 'draft', 'private')
+				$where_search_clause"
+			);
+
+			$data = array_map(function($post) {
+				return [
+					'id' => $post->ID,
+					'title' => $post->post_title,
+					'date' => $post->post_date,
+					'author' => $post->author,
+					'status' => $post->post_status
+				];
+			}, $posts);
+
+			return new WP_REST_Response([
+				'success' => true,
+				'data' => $data,
+				'total' => $posts_count
+			], 200);
+		} catch (Exception $e) {
+			return new WP_REST_Response(['success' => false, 'message' => $e->getMessage()], 500);
 		}
 	}
 	#endregion
@@ -882,6 +991,33 @@ class Meow_MWSEO_Rest
 				'success' => false,
 				'message' => $e->getMessage(),
 			], 500 );
+		}
+	}
+
+	function rest_get_languages() {
+		// Check if Polylang is active
+		if ( function_exists( 'pll_languages_list' ) ) {
+			$languages = [];
+			$language_slugs = pll_languages_list();
+			$language_names = pll_languages_list(['fields' => 'name']);
+			
+			foreach ( $language_slugs as $index => $slug ) {
+				$languages[] = [
+					'slug' => $slug,
+					'name' => $language_names[$index]
+				];
+			}
+			
+			return new WP_REST_Response([
+				'success' => true,
+				'languages' => $languages,
+			], 200 );
+		} else {
+			// Return empty array if Polylang is not active
+			return new WP_REST_Response([
+				'success' => true,
+				'languages' => [],
+			], 200 );
 		}
 	}
 }
