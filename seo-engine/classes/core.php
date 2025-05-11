@@ -9,6 +9,7 @@ class Meow_MWSEO_Core
 	public $meta_key_seo_title = '_kiss_seo_title';
 	public $meta_key_seo_excerpt = '_kiss_seo_excerpt';
 	public $meta_key_skip = '_kiss_seo_ignore';
+	public $meta_key_seo_keywords = '_seo_engine_ai_keywords';
 
 	private $option_name = 'seo_kiss_options';
 
@@ -40,7 +41,7 @@ class Meow_MWSEO_Core
 				'init',
 				function() {
 					$provider = new Meow_MWSEO_Sitemap( $this );
-					wp_register_sitemap_provider( SEOENGINE_DOMAIN, $provider );
+					wp_register_sitemap_provider( MWSEO_DOMAIN, $provider );
 				}
 			);
 
@@ -97,8 +98,8 @@ class Meow_MWSEO_Core
 		$path = $this->get_option( 'logs_path' );
 
 		if ( $path && file_exists( $path ) ) {
-			// make sure the path is legal (within the uploads directory with the SEOENGINE_PREFIX and log extension)
-			if ( strpos( $path, $uploads_dir_path ) !== 0 || strpos( $path, SEOENGINE_PREFIX ) === false || substr( $path, -4 ) !== '.log' ) {
+			// make sure the path is legal (within the uploads directory with the MWSEO_PREFIX and log extension)
+			if ( strpos( $path, $uploads_dir_path ) !== 0 || strpos( $path, MWSEO_PREFIX ) === false || substr( $path, -4 ) !== '.log' ) {
 				$path = null;
 			} else {
 				return $path;
@@ -106,7 +107,7 @@ class Meow_MWSEO_Core
 		}
 
 		if ( !$path ) {
-			$path = $uploads_dir_path . SEOENGINE_PREFIX . "_" . $this->random_ascii_chars() . ".log";
+			$path = $uploads_dir_path . MWSEO_PREFIX . "_" . $this->random_ascii_chars() . ".log";
 			if ( !file_exists( $path ) ) {
 				touch( $path );
 			}
@@ -1016,6 +1017,87 @@ class Meow_MWSEO_Core
 
 	#region Utilities
 
+	function import_yoast() {
+		// For all the selected post types, get the _yoast_wpseo_title & _yoast_wpseo_metadesc	and import them to _kiss_seo_title & _kiss_seo_excerpt
+		$post_types = $this->get_option( 'seo_engine_select_post_types', array( 'post ') );
+		$posts = get_posts( array(
+			'post_type' => $post_types,
+			'posts_per_page' => -1,
+			'meta_query' => array(
+				array(
+					'key' => '_yoast_wpseo_title',
+					'compare' => 'EXISTS',
+				),
+				array(
+					'key' => '_yoast_wpseo_metadesc',
+					'compare' => 'EXISTS',
+				),
+			),
+		) );
+
+		foreach ( $posts as $post ) {
+			$yoast_title = get_post_meta( $post->ID, '_yoast_wpseo_title', true );
+			$yoast_excerpt = get_post_meta( $post->ID, '_yoast_wpseo_metadesc', true );
+			$yoast_keywords = get_post_meta( $post->ID, '_yoast_wpseo_focuskw', true );
+
+			if ( !empty( $yoast_title ) ) {
+				update_post_meta( $post->ID, $this->meta_key_seo_title, $yoast_title );
+			}
+			if ( !empty( $yoast_excerpt ) ) {
+				update_post_meta( $post->ID, $this->meta_key_seo_excerpt, $yoast_excerpt );
+			}
+			if ( !empty( $yoast_keywords ) ) {
+				$keywords = explode( ',', $yoast_keywords );
+				$keywords = array_slice( $keywords, 0, 5 );
+				
+				update_post_meta( $post->ID, $this->meta_key_seo_keywords, $keywords );
+			}
+		}
+
+		return count( $posts );
+	}
+
+	function import_rank_math() {
+		// For all the selected post types, get the _rank_math_title & _rank_math_description and import them to _kiss_seo_title & _kiss_seo_excerpt
+		$post_types = $this->get_option( 'seo_engine_select_post_types', array( 'post ') );
+		$posts = get_posts( array(
+			'post_type' => $post_types,
+			'posts_per_page' => -1,
+			'meta_query' => array(
+				array(
+					'key' => 'rank_math_title',
+					'compare' => 'EXISTS',
+				),
+				array(
+					'key' => 'rank_math_description',
+					'compare' => 'EXISTS',
+				),
+			),
+		) );
+
+		foreach ( $posts as $post ) {
+
+			$rank_math_title = get_post_meta( $post->ID, 'rank_math_title', true );
+			$rank_math_excerpt = get_post_meta( $post->ID, 'rank_math_description', true );
+			$rank_math_keywords = get_post_meta( $post->ID, 'rank_math_focus_keyword', true );
+
+			if ( !empty( $rank_math_title ) ) {
+				update_post_meta( $post->ID, $this->meta_key_seo_title, $rank_math_title );
+			}
+			if ( !empty( $rank_math_excerpt ) ) {
+				update_post_meta( $post->ID, $this->meta_key_seo_excerpt, $rank_math_excerpt );
+			}
+			if ( !empty( $rank_math_keywords ) ) {
+				$keywords = explode( ',', $rank_math_keywords );
+				$keywords = array_slice( $keywords, 0, 5 );
+				
+				update_post_meta( $post->ID, $this->meta_key_seo_keywords, $keywords );
+			}
+		}
+
+		return count( $posts );
+	}
+
 	function add_wc_meta_boxes()
 	{
 		if (get_post_type() !== 'product') {
@@ -1024,7 +1106,7 @@ class Meow_MWSEO_Core
 
 		add_meta_box(
 			'mwseo-metadata',
-			__('SEO Engine', SEOENGINE_PREFIX),
+			__('SEO Engine', MWSEO_PREFIX),
 			array($this, 'render_wc_metadata_metabox'),
 			'product',
 			'side',

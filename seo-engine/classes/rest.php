@@ -93,6 +93,11 @@ class Meow_MWSEO_Rest
 				'permission_callback' => array( $this->core, 'can_access_settings' ),
 				'callback' => array( $this, 'rest_get_ai_keywords' )
 			) );
+			register_rest_route( $this->namespace, '/import_data', array(
+				'methods' => 'POST',
+				'permission_callback' => array( $this->core, 'can_access_settings' ),
+				'callback' => array( $this, 'rest_import_data' )
+			) );
 
 			// Google Ranking
 			register_rest_route( $this->namespace, '/fetch_searches', array(
@@ -950,6 +955,49 @@ class Meow_MWSEO_Rest
 					'slug' => $suggestion[ 'slug' ],
 				]
 			], 200 );
+	
+		}
+		catch( Exception $e)
+		{
+			return new WP_REST_Response([
+				'success' => false,
+				'message' => $e->getMessage(),
+			], 500 );
+		}
+	}
+
+	function rest_import_data( $request ) {
+		try {
+			$params = $request->get_json_params();
+			$plugin = $params[ 'plugin' ];
+	
+			switch ( $plugin ) {
+				case 'rankmath':
+					$import = $this->core->import_rank_math();
+					break;
+				case 'yoast':
+					$import = $this->core->import_yoast();
+					break;
+				default:
+					return new WP_REST_Response([
+						'success' => true,
+						'message' => 'Invalid plugin.',
+					], 200 );
+			}
+
+			if ( $import ) {
+				return new WP_REST_Response([
+					'success' => true,
+					'message' => "$import post(s) SEO data imported.",
+					'data' => $import,
+				], 200 );
+			}
+			else {
+				return new WP_REST_Response([
+					'success' => true,
+					'message' => 'No posts found to import.',
+				], 200 );
+			}
 	
 		}
 		catch( Exception $e)

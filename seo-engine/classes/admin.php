@@ -6,7 +6,7 @@ class Meow_MWSEO_Admin extends MeowCommon_Admin {
 	public function __construct( $core ) {
 		$this->core = $core;
 		
-		parent::__construct( SEOENGINE_PREFIX, SEOENGINE_ENTRY, SEOENGINE_DOMAIN, class_exists( 'MeowPro_MWSEO_Core' ) );
+		parent::__construct( MWSEO_PREFIX, MWSEO_ENTRY, MWSEO_DOMAIN, class_exists( 'MeowPro_MWSEO_Core' ) );
 		if ( is_admin() ) {
 			add_action( 'admin_menu', array( $this, 'app_menu' ) );
 
@@ -15,7 +15,7 @@ class Meow_MWSEO_Admin extends MeowCommon_Admin {
 			$post = isset( $_GET["post"] ) ? intval( $_GET["post"] ) : null;
 			$post_type = isset( $_GET["post_type"] ) ? sanitize_text_field( $_GET["post_type"] ) : null;
 
-			$is_seo_engine_screen = in_array( $page, [ SEOENGINE_PREFIX . '_settings', 'seo_engine_dashboard' ] );
+			$is_seo_engine_screen = in_array( $page, [ MWSEO_PREFIX . '_settings', 'seo_engine_dashboard' ] );
 			$is_meowapps_dashboard = $page === 'meowapps-main-menu';
 
 			$is_wc_product = get_post_type( $post ) === 'product';
@@ -138,12 +138,12 @@ class Meow_MWSEO_Admin extends MeowCommon_Admin {
 	function admin_enqueue_scripts() {
 
 		// Load the scripts
-		$physical_file = SEOENGINE_PATH . '/app/index.js';
-		$cache_buster = file_exists( $physical_file ) ? filemtime( $physical_file ) : SEOENGINE_VERSION;
-		wp_register_script( 'seo_engine_seo-vendor', SEOENGINE_URL . 'app/vendor.js',
+		$physical_file = MWSEO_PATH . '/app/index.js';
+		$cache_buster = file_exists( $physical_file ) ? filemtime( $physical_file ) : MWSEO_VERSION;
+		wp_register_script( 'seo_engine_seo-vendor', MWSEO_URL . 'app/vendor.js',
 			['wp-element', 'wp-i18n'], $cache_buster
 		);
-		wp_register_script( 'seo_engine_seo', SEOENGINE_URL . 'app/index.js',
+		wp_register_script( 'seo_engine_seo', MWSEO_URL . 'app/index.js',
 			['seo_engine_seo-vendor', 'wp-i18n'], $cache_buster
 		);
 		wp_set_script_translations( 'seo_engine_seo', 'seo-engine' );
@@ -153,9 +153,9 @@ class Meow_MWSEO_Admin extends MeowCommon_Admin {
 		wp_localize_script( 'seo_engine_seo', 'seo_engine_seo', [
 			'api_url' => rest_url( 'seo-engine/v1' ),
 			'rest_url' => rest_url(),
-			'plugin_url' => SEOENGINE_URL,
-			'prefix' => SEOENGINE_PREFIX,
-			'domain' => SEOENGINE_DOMAIN,
+			'plugin_url' => MWSEO_URL,
+			'prefix' => MWSEO_PREFIX,
+			'domain' => MWSEO_DOMAIN,
 			'is_pro' => class_exists( 'MeowPro_MWSEO_Core' ),
 			'is_registered' => !!$this->is_registered(),
 			'rest_nonce' => wp_create_nonce( 'wp_rest' ),
@@ -166,16 +166,16 @@ class Meow_MWSEO_Admin extends MeowCommon_Admin {
 	}
 
 	function is_registered() {
-		return apply_filters( SEOENGINE_PREFIX . '_meowapps_is_registered', false, SEOENGINE_PREFIX );
+		return apply_filters( MWSEO_PREFIX . '_meowapps_is_registered', false, MWSEO_PREFIX );
 	}
 
 	function app_menu() {
 		add_submenu_page( 'meowapps-main-menu', 'SEO Engine', 'SEO Engine', 'manage_options',
-			SEOENGINE_PREFIX . '_settings', array( $this, 'admin_settings' ) );
+			MWSEO_PREFIX . '_settings', array( $this, 'admin_settings' ) );
 	}
 
 	function admin_settings() {
-		echo '<div id="' . SEOENGINE_PREFIX . '-admin-settings"></div>';
+		echo '<div id="' . MWSEO_PREFIX . '-admin-settings"></div>';
 	}
 
 	

@@ -4,7 +4,7 @@ Tags: seo, ai, google, search, optimization
 Donate link: https://www.patreon.com/meowapps
 Requires at least: 6.0
 Tested up to: 6.8
-Stable tag: 0.3.8
+Stable tag: 0.3.9
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -57,6 +57,10 @@ Replace all the files. Nothing else to do.
 Nothing yet.
 
 == Changelog ==
+
+= 0.3.9 (2025/05/11) =
+* Update: Reorganized the dashboard with new modules for easier navigation.
+* Add: Import option for Yoast and Rank Math SEO data, including SEO title, description, and keywords.
 
 = 0.3.8 (2025/05/01) =
 * Fix: Allowed saving even when no posts are selected.

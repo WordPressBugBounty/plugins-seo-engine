@@ -225,7 +225,7 @@ class Meow_MWSEO_Sitemap extends WP_Sitemaps_Provider
 
     // * Now we create the main sitemap index file
     $index_xml  = '<?xml version="1.0" encoding="UTF-8"?>' . "\n";
-    $index_xml .= '<?xml-stylesheet type="text/xsl" href="' . SEOENGINE_URL . 'classes/sitemap-style.xsl"?>' . "\n";
+    $index_xml .= '<?xml-stylesheet type="text/xsl" href="' . MWSEO_URL . 'classes/sitemap-style.xsl"?>' . "\n";
     $index_xml .= '<sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">' . "\n";
 
     foreach ( $sitemaps as $item ) {
@@ -287,7 +287,7 @@ private function create_sitemap_for_post_type( $post_type, $excluded_posts = [],
 
   // Build sub-sitemap XML
   $xml  = '<?xml version="1.0" encoding="UTF-8"?>' . "\n";
-  $xml .= '<?xml-stylesheet type="text/xsl" href="' . SEOENGINE_URL . 'classes/sitemap-style.xsl"?>' . "\n";
+  $xml .= '<?xml-stylesheet type="text/xsl" href="' . MWSEO_URL . 'classes/sitemap-style.xsl"?>' . "\n";
   $xml .= '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">' . "\n";
 
   foreach ( $posts as $post ) {
@@ -328,7 +328,7 @@ private function create_sitemap_for_taxonomy( $taxonomy ) {
   }
 
   $xml  = '<?xml version="1.0" encoding="UTF-8"?>' . "\n";
-  $xml .= '<?xml-stylesheet type="text/xsl" href="' . SEOENGINE_URL . 'classes/sitemap-style.xsl"?>' . "\n";
+  $xml .= '<?xml-stylesheet type="text/xsl" href="' . MWSEO_URL . 'classes/sitemap-style.xsl"?>' . "\n";
   $xml .= '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">' . "\n";
 
   foreach ( $terms as $term ) {
@@ -369,7 +369,7 @@ private function create_sitemap_for_users() {
   }
 
   $xml  = '<?xml version="1.0" encoding="UTF-8"?>' . "\n";
-  $xml .= '<?xml-stylesheet type="text/xsl" href="' . SEOENGINE_URL . 'classes/sitemap-style.xsl"?>' . "\n";
+  $xml .= '<?xml-stylesheet type="text/xsl" href="' . MWSEO_URL . 'classes/sitemap-style.xsl"?>' . "\n";
   $xml .= '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">' . "\n";
 
   foreach ( $users as $user ) {
