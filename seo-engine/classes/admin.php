@@ -21,7 +21,7 @@ class Meow_MWSEO_Admin extends MeowCommon_Admin {
 			$is_wc_product = get_post_type( $post ) === 'product';
 			$is_wc_new_product = $post_type === 'product';
 
-			$is_wc_assistant_enabled = $this->core->get_option( 'seo_engine_woocommerce_assistant', false );
+			$is_wc_assistant_enabled = $this->core->get_option( 'woocommerce_assistant', false );
 
 			if ( $is_meowapps_dashboard || $is_seo_engine_screen ) {
 				add_action( 'admin_enqueue_scripts', array( $this, 'admin_enqueue_scripts' ) );
@@ -39,14 +39,14 @@ class Meow_MWSEO_Admin extends MeowCommon_Admin {
 
 	function seo_engine_sitemap_headers( $headers ) {
 
-		$disabled = $this->core->get_option( 'seo_engine_disable_wp_sitemap', false );
-   		$custom   = $this->core->get_option( 'seo_engine_sitemap_custom', false );
+		$disabled = $this->core->get_option( 'disable_wp_sitemap', false );
+   		$custom   = $this->core->get_option( 'sitemap_custom', false );
 
 		if( $disabled && !$custom ) {
 			return $headers;
 		}
 
-		$excluded_posts = $this->core->get_option( 'seo_engine_sitemap_excluded_post_ids', [] );
+		$excluded_posts = $this->core->get_option( 'sitemap_excluded_post_ids', [] );
 		$excluded_posts = array_map( 'intval', $excluded_posts );
 		$post_id = get_the_ID();
 
@@ -61,12 +61,11 @@ class Meow_MWSEO_Admin extends MeowCommon_Admin {
 	}
 
 	function seo_engine_headers( $headers ) {
-		if( !$this->core->get_option( 'seo_engine_social_networks', false ) ) { return $headers;}
+		if( !$this->core->get_option( 'social_networks', false ) ) { return $headers;}
 
 		// use open graph tags for social networks, we should use the featured image, title and excerpt
 		if ( is_single() || is_page() ) {
-
-			$featured_image = apply_filters( 'seo_engine_social_networks_featured_image', get_the_post_thumbnail_url(), get_the_ID() );
+			$featured_image = apply_filters( 'mwseo_featured_image', get_the_post_thumbnail_url(), get_the_ID() );
 			$featured_image_alt = get_post_meta( get_post_thumbnail_id(), '_wp_attachment_image_alt', true );
 			$excerpt = get_the_excerpt();
 			$title = get_the_title();
@@ -76,12 +75,12 @@ class Meow_MWSEO_Admin extends MeowCommon_Admin {
 			$site_description = get_bloginfo('description');
 			$site_icon = get_site_icon_url();
 
-			$site_twitter = $this->core->get_option('seo_engine_social_networks_twitter', null);
+			$site_twitter = $this->core->get_option('social_networks_twitter', null);
 			if ( !empty( $site_twitter ) ) {
 				$site_twitter = $site_twitter[0] === '@' ? $site_twitter : '@' . $site_twitter;
 			}
 
-			$site_facebook_app_id = $this->core->get_option('seo_engine_social_networks_facebook_app_id', null);
+			$site_facebook_app_id = $this->core->get_option('social_networks_facebook_app_id', null);
 			
 			#region General Open Graph tags
 			
@@ -150,7 +149,7 @@ class Meow_MWSEO_Admin extends MeowCommon_Admin {
 		wp_enqueue_script('seo_engine_seo' );
 
 		// Localize and options
-		wp_localize_script( 'seo_engine_seo', 'seo_engine_seo', [
+		wp_localize_script( 'seo_engine_seo', 'mwseo', [
 			'api_url' => rest_url( 'seo-engine/v1' ),
 			'rest_url' => rest_url(),
 			'plugin_url' => MWSEO_URL,
@@ -162,6 +161,14 @@ class Meow_MWSEO_Admin extends MeowCommon_Admin {
 			'fabicon_url' => get_site_icon_url(),
 			'site_name' => get_bloginfo('name'),
 			'options' => $this->core->sanitized_options(),
+			'google_analytics' => $this->core->get_google_analytics_state(),
+			'last_insights' => $this->core->get_last_insights(),
+			'active_seo_plugins' => [
+				'yoast'      => class_exists( 'WPSEO_Frontend' ),
+				'all_in_one' => class_exists( 'All_in_One_SEO_Pack' ),
+				'rank_math'  => class_exists( 'RankMath\Frontend' ),
+				'seopress'   => class_exists( 'SEOPress' ),
+			]
 		] );
 	}
 

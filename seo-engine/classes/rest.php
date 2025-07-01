@@ -19,7 +19,7 @@ class Meow_MWSEO_Rest
 
 	function rest_api_init() {
 		try {
-			// LOGS
+			#region REST LOGS
 			register_rest_route( $this->namespace, '/get_logs', array(
 				'methods' => 'GET',
 				'permission_callback' => array( $this->core, 'can_access_features' ),
@@ -30,6 +30,29 @@ class Meow_MWSEO_Rest
 				'permission_callback' => array( $this->core, 'can_access_features' ),
 				'callback' => array( $this, 'rest_clear_logs' )
 			) );
+			#endregion
+			
+			#region REST  Robots.txt
+			register_rest_route( $this->namespace, '/get_robots_txt', array(
+				'methods' => 'GET',
+				'permission_callback' => array( $this->core, 'can_access_features' ),
+				'callback' => array( $this, 'rest_get_robots_txt' )
+			) );
+			register_rest_route( $this->namespace, '/update_robots_txt', array(
+				'methods' => 'POST',
+				'permission_callback' => array( $this->core, 'can_access_features' ),
+				'callback' => array( $this, 'rest_update_robots_txt' )
+			) );
+			register_rest_route( $this->namespace, '/ai_generate_robots_txt', array(
+				'methods' => 'POST',
+				'permission_callback' => array( $this->core, 'can_access_features' ),
+				'callback' => array( $this, 'rest_ai_generate_robots_txt' )
+			) );
+			
+			#endregion
+
+			#region REST POSTS
+
 			register_rest_route( $this->namespace, '/fetch_posts', array(
 				'methods' => 'POST',
 				'permission_callback' => array( $this->core, 'can_access_features' ),
@@ -39,23 +62,6 @@ class Meow_MWSEO_Rest
 					'offset' => array( 'required' => false, 'default' => 0 ),
 					'limit' => array( 'required' => false, 'default' => 10 ),
 				)
-			) );
-
-			// SETTINGS
-			register_rest_route( $this->namespace, '/settings/update', array(
-				'methods' => 'POST',
-				'permission_callback' => array( $this->core, 'can_access_settings' ),
-				'callback' => array( $this, 'rest_settings_update' )
-			) );
-			register_rest_route( $this->namespace, '/settings/list', array(
-				'methods' => 'GET',
-				'permission_callback' => array( $this->core, 'can_access_settings' ),
-				'callback' => array( $this, 'rest_settings_list' ),
-			) );
-			register_rest_route( $this->namespace, '/settings/reset', array(
-				'methods' => 'POST',
-				'permission_callback' => array( $this->core, 'can_access_settings' ),
-				'callback' => array( $this, 'rest_settings_reset' ),
 			) );
 
 			register_rest_route( $this->namespace, '/post_types', array(
@@ -83,23 +89,54 @@ class Meow_MWSEO_Rest
 				'permission_callback' => array( $this->core, 'can_access_settings' ),
 				'callback' => array( $this, 'rest_one_or_last_post' )
 			) );
-			register_rest_route( $this->namespace, '/update_skip_option', array(
-				'methods' => 'POST',
-				'permission_callback' => array( $this->core, 'can_access_settings' ),
-				'callback' => array( $this, 'rest_update_skip_option' )
-			) );
+
 			register_rest_route( $this->namespace, '/get_ai_keywords', array(
 				'methods' => 'POST',
 				'permission_callback' => array( $this->core, 'can_access_settings' ),
 				'callback' => array( $this, 'rest_get_ai_keywords' )
 			) );
+			
+			register_rest_route( $this->namespace, '/get_score_factors', array(
+				'methods' => 'GET',
+				'permission_callback' => array( $this->core, 'can_access_settings' ),
+				'callback' => array( $this, 'rest_get_score_factors' )
+			) );
+
+			#endregion
+
+			#region REST SETTINGS
+			register_rest_route( $this->namespace, '/settings/update', array(
+				'methods' => 'POST',
+				'permission_callback' => array( $this->core, 'can_access_settings' ),
+				'callback' => array( $this, 'rest_settings_update' )
+			) );
+			register_rest_route( $this->namespace, '/settings/list', array(
+				'methods' => 'GET',
+				'permission_callback' => array( $this->core, 'can_access_settings' ),
+				'callback' => array( $this, 'rest_settings_list' ),
+			) );
+			register_rest_route( $this->namespace, '/settings/reset', array(
+				'methods' => 'POST',
+				'permission_callback' => array( $this->core, 'can_access_settings' ),
+				'callback' => array( $this, 'rest_settings_reset' ),
+			) );
+
+			
+			register_rest_route( $this->namespace, '/update_skip_option', array(
+				'methods' => 'POST',
+				'permission_callback' => array( $this->core, 'can_access_settings' ),
+				'callback' => array( $this, 'rest_update_skip_option' )
+			) );
+			
 			register_rest_route( $this->namespace, '/import_data', array(
 				'methods' => 'POST',
 				'permission_callback' => array( $this->core, 'can_access_settings' ),
 				'callback' => array( $this, 'rest_import_data' )
 			) );
 
-			// Google Ranking
+			#endregion
+
+			#region REST Google Ranking
 			register_rest_route( $this->namespace, '/fetch_searches', array(
 				'methods' => 'GET',
 				'permission_callback' => array( $this->core, 'can_access_settings' ),
@@ -116,7 +153,19 @@ class Meow_MWSEO_Rest
 				'callback' => array( $this, 'rest_delete_search' )
 			) );
 
-			// WooCommerce
+			#endregion
+
+			#region REST Performance Insights
+			register_rest_route( $this->namespace, '/get_insights', array(
+				'methods' => 'POST',
+				'permission_callback' => array( $this->core, 'can_access_settings' ),
+				'callback' => array( $this, 'rest_get_insights' )
+			) );
+
+			#endregion
+
+			#region REST WooCommerce
+
 			register_rest_route( $this->namespace, '/generate_fields', array(
 				'methods' => 'POST',
 				'permission_callback' => array( $this->core, 'can_access_settings' ),
@@ -134,9 +183,10 @@ class Meow_MWSEO_Rest
 				'permission_callback' => array( $this->core, 'can_access_settings' ),
 				'callback' => array( $this, 'rest_get_all_ids' )
 			) );
+			
+			#endregion
 
-
-			// AI Engine
+			#region REST AI Engine
 			register_rest_route( $this->namespace, '/ai_suggestion', array(
 				'methods' => 'POST',
 				'permission_callback' => array( $this->core, 'can_access_settings' ),
@@ -163,12 +213,85 @@ class Meow_MWSEO_Rest
 				'callback' => array( $this, 'rest_ai_magic_fix_new_suggestion' )
 			) );
 			
-			// Languages
+			#region REST Languages
 			register_rest_route( $this->namespace, '/get_languages', array(
 				'methods' => 'GET',
 				'permission_callback' => array( $this->core, 'can_access_settings' ),
 				'callback' => array( $this, 'rest_get_languages' )
 			) );
+
+			#endregion
+
+			#region REST Analytics
+			register_rest_route( $this->namespace, '/analytics/data', array(
+				'methods' => 'POST',
+				'permission_callback' => array( $this->core, 'can_access_settings' ),
+				'callback' => array( $this, 'rest_get_analytics_data' )
+			) );
+			register_rest_route( $this->namespace, '/analytics/summary', array(
+				'methods' => 'POST',
+				'permission_callback' => array( $this->core, 'can_access_settings' ),
+				'callback' => array( $this, 'rest_get_analytics_summary' )
+			) );
+			register_rest_route( $this->namespace, '/analytics/top_posts', array(
+				'methods' => 'POST',
+				'permission_callback' => array( $this->core, 'can_access_settings' ),
+				'callback' => array( $this, 'rest_get_top_posts' )
+			) );
+
+			#endregion
+
+			#region REST Google Analytics
+			
+			register_rest_route( $this->namespace, '/google-analytics/check_auth', array(
+				'methods' => 'GET',
+				'permission_callback' => array( $this->core, 'can_access_settings' ),
+				'callback' => array( $this, 'rest_check_google_analytics_authenticated' )
+			) );
+
+			register_rest_route( $this->namespace, '/google-analytics/get_auth', array(
+				'methods' => 'GET',
+				'permission_callback' => array( $this->core, 'can_access_settings' ),
+				'callback' => array( $this, 'rest_get_google_analytics_auth' )
+			) );
+			register_rest_route( $this->namespace, '/google-analytics/unlink', array(
+				'methods' => 'GET',
+				'permission_callback' => array( $this->core, 'can_access_settings' ),
+				'callback' => array( $this, 'rest_unlink_google_analytics' )
+			) );
+			register_rest_route( $this->namespace, '/google-analytics/data', array(
+				'methods' => 'POST',
+				'permission_callback' => array( $this->core, 'can_access_settings' ),
+				'callback' => array( $this, 'rest_get_google_analytics_data' )
+			) );
+			register_rest_route( $this->namespace, '/google-analytics/summary', array(
+				'methods' => 'POST',
+				'permission_callback' => array( $this->core, 'can_access_settings' ),
+				'callback' => array( $this, 'rest_get_google_analytics_summary' )
+			) );
+			register_rest_route( $this->namespace, '/google-analytics/top_posts', array(
+				'methods' => 'POST',
+				'permission_callback' => array( $this->core, 'can_access_settings' ),
+				'callback' => array( $this, 'rest_get_google_analytics_top_posts' )
+			) );
+			register_rest_route( $this->namespace, '/google-analytics/realtime', array(
+				'methods' => 'POST',
+				'permission_callback' => array( $this->core, 'can_access_settings' ),
+				'callback' => array( $this, 'rest_get_google_analytics_realtime' )
+			) );
+
+			#endregion
+
+
+			#region REST Sitemap	
+			register_rest_route( $this->namespace, '/sitemap/generate', array(
+				'methods' => 'GET',
+				'permission_callback' => array( $this->core, 'can_access_settings' ),
+				'callback' => array( $this, 'rest_sitemap_generate' )
+			) );
+
+			#endregion
+		
 		}
 		catch (Exception $e) {
 			var_dump($e);
@@ -258,7 +381,7 @@ class Meow_MWSEO_Rest
 	}
 
 	function rest_posts($request) {
-		$post_type = get_option('seo_kiss_options', null)['seo_engine_default_post_type'] ?? null;
+		$post_type = $this->core->get_option('default_post_type', 'post');
 	
 		$params = $request->get_json_params();
 	
@@ -274,7 +397,7 @@ class Meow_MWSEO_Rest
 		// Get language filter
 		$language = isset($params['language']) ? $params['language'] : null;
 		if (empty($language) || $language === 'all') {
-			$language = get_option('seo_kiss_options', null)['seo_engine_default_language'] ?? 'all';
+			$language = $this->core->get_option('default_language', 'all');
 		}
 	
 		$total_counts = [
@@ -374,8 +497,8 @@ class Meow_MWSEO_Rest
 	}
 
 	function rest_get_all_ids() {
-		$post_type = get_option('seo_kiss_options', null)['seo_engine_default_post_type'] ?? 'post';
-		$language = get_option('seo_kiss_options', null)['seo_engine_default_language'] ?? 'all';
+		$post_type = $this->core->get_option( 'default_post_type', 'post' );
+		$language  = $this->core->get_option( 'default_language', 'all' );
 	
 		$args = [
 			'post_type' => $post_type,
@@ -443,7 +566,7 @@ class Meow_MWSEO_Rest
 
 		$featured_image = get_the_post_thumbnail_url( $post->ID, 'full' );
 		$featured_image = $featured_image ? $featured_image : "https://placehold.co/1200x630?text=No+Featured+Image";
-		$featured_image = apply_filters( 'seo_engine_social_networks_featured_image', $featured_image, $post->ID );
+		$featured_image = apply_filters( 'mwseo_sns_featured_image', $featured_image, $post->ID );
 
 		
 
@@ -636,6 +759,50 @@ class Meow_MWSEO_Rest
 	}
 	#endregion
 
+	#region Performance Insights
+
+	function rest_get_insights( $request ) {
+		try {
+			$params = $request->get_json_params();
+			$post_id = isset( $params['post'] ) ? $params['post'] : null;
+
+			if ( !$post_id ) {
+				return new WP_REST_Response([
+					'success' => false,
+					'message' => 'Post ID is required.',
+				], 400 );
+			}
+
+			// Check if post exists
+			$post = get_post( $post_id );
+			if ( !$post && $post_id !== 'main' && $post_id !== 'delete' ) {
+				return new WP_REST_Response([
+					'success' => false,
+					'message' => 'Invalid Post ID.',
+				], 404 );
+			}
+
+			$result = $this->core->get_speed_and_vitals( $post_id );
+
+			if ( $result === false ) {
+				return new WP_REST_Response([
+					'success' => false,
+					'message' => 'Failed to retrieve insights.',
+				], 500 );
+			}
+
+			return new WP_REST_Response([
+				'success' => true,
+				'data' => $result
+			], 200);
+		} catch (Exception $e) {
+			$this->core->log( 'Error in rest_get_insights: ' . $e->getMessage() );
+			return new WP_REST_Response(['success' => false, 'message' => 'An unexpected error occurred: ' . $e->getMessage()], 500);
+		}
+	}
+
+
+	#endregion
 
 	#region Google Ranking
 	function rest_fetch_searches(  ) {
@@ -1041,6 +1208,32 @@ class Meow_MWSEO_Rest
 			], 500 );
 		}
 	}
+	
+	function rest_get_score_factors() {
+		try {
+			global $mwseo_score;
+			
+			if ( !$mwseo_score ) {
+				return new WP_REST_Response([
+					'success' => false,
+					'message' => 'Score module not initialized.',
+				], 500 );
+			}
+			
+			$factors = $mwseo_score->get_score_factors();
+			
+			return new WP_REST_Response([
+				'success' => true,
+				'data' => $factors
+			], 200 );
+		}
+		catch( Exception $e ) {
+			return new WP_REST_Response([
+				'success' => false,
+				'message' => $e->getMessage(),
+			], 500 );
+		}
+	}
 
 	function rest_get_languages() {
 		// Check if Polylang is active
@@ -1068,4 +1261,356 @@ class Meow_MWSEO_Rest
 			], 200 );
 		}
 	}
+
+	#region Robots.txt
+	function rest_get_robots_txt() {
+		$robots = $this->core->get_robots_txt();
+
+		$robotsTxt = $robots['content'] ?? '';
+		$source    = $robots['source'] ?? 'default';
+
+		
+		return new WP_REST_Response( [ 'success' => true, 'data' => $robotsTxt, 'source' => $source ], 200 );
+	}
+
+	function rest_update_robots_txt( $request) {
+		
+		
+		$params = $request->get_json_params();
+		$content = $params['content'] ?? '';
+
+		if ( empty( $content ) ) {
+			return new WP_REST_Response( [ 
+				'success' => false, 
+				'message' => 'Content is empty. Please provide valid content.'
+			], 400 );
+		}
+
+		// Validate the content (basic validation)
+		if ( strlen( $content ) > 5000 ) {
+			return new WP_REST_Response( [ 
+				'success' => false, 
+				'message' => 'Content is too long. Please limit it to 5000 characters.'
+			], 400 );
+		}
+		
+		$result = $this->core->set_robots_txt( $content );
+		
+		if ($result === false) {
+			return new WP_REST_Response( [ 
+				'success' => false, 
+				'message' => 'Could not write to robots.txt file. Please check file permissions.'
+			], 500 );
+		}
+		
+		return new WP_REST_Response( [ 'success' => true ], 200 );
+	}
+
+	function rest_ai_generate_robots_txt( $request ) {
+		try {
+			$params  = $request->get_json_params();
+
+			$prompt  = $params['prompt'] ?? 'Generate a robots.txt file for a WordPress website.';
+			$content = $params['content'] ?? '';
+
+			if ( empty( $prompt ) ) {
+				return new WP_REST_Response( [ 
+					'success' => false, 
+					'message' => 'Prompt is empty. Please provide a valid prompt.'
+				], 400 );
+			}
+
+			global $mwai;
+			if (is_null( $mwai ) || !isset( $mwai ) ) {
+				return new WP_REST_Response( [ 
+					'success' => false, 
+					'message' => 'Missing AI Engine.'
+				], 500 );
+			}
+
+			// Gather the necessary data for the prompt
+			$site_url          = get_site_url();
+			$site_name         = get_bloginfo( 'name' );
+			$site_description  = get_bloginfo( 'description' );
+			$site_language     = get_option( 'WPLANG' );
+			$site_admin_email  = get_option( 'admin_email' );
+			$site_post_types   = get_post_types( [ 'public' => true ], 'names' );
+			$site_taxonomies   = get_taxonomies( [ 'public' => true ], 'names' );
+			$site_sitemap      = get_option( 'home' ) . '/sitemap.xml';
+			$site_last_updated = date( 'Y-m-d H:i:s' );
+
+			$site_data = [
+				'site_url'          => $site_url,
+				'site_name'         => $site_name,
+				'site_description'  => $site_description,
+				'site_language'     => $site_language,
+				'site_admin_email'  => $site_admin_email,
+				'site_post_types'   => implode( ', ', $site_post_types ),
+				'site_taxonomies'   => implode( ', ', $site_taxonomies ),
+				'site_sitemap'      => $site_sitemap,
+				'site_last_updated' => $site_last_updated,
+			];
+
+			$site_data_json = json_encode( $site_data, JSON_PRETTY_PRINT );
+
+
+			$instructions = "Generate a robots.txt file for a WordPress website. The content should be SEO optimized. Here are the details of the website:\n\n";
+			$instructions .= "Website Data:\n";
+			$instructions .= $site_data_json . "\n\n";
+			$instructions .= "Here is the prompt from the user:\n";
+			$instructions .= $prompt . "\n\n";
+			$instructions .= "The current content of the robots.txt file is:\n";
+			$instructions .= $content . "\n\n";
+			$instructions .= "Please generate a robots.txt file based on the above information. Don't include any explanations, just provide the raw text of the robots.txt file. No quotes, no code blocks, just the text. The content should be SEO optimized and follow best practices for a WordPress website.\n\n";
+
+			$robots_txt = $mwai->simpleTextQuery( $instructions );
+			if ( empty( $robots_txt ) || is_null( $robots_txt ) ) {
+				return new WP_REST_Response( [ 
+					'success' => false, 
+					'message' => 'AI suggestion is invalid.'
+				], 400 );
+			}
+
+			// Validate the generated robots.txt content
+			if ( strlen( $robots_txt ) > 5000 ) {
+				return new WP_REST_Response( [ 
+					'success' => false, 
+					'message' => 'Generated content is too long. Please limit it to 5000 characters.'
+				], 400 );
+			}
+
+			// Send the generated robots.txt content back to the client
+			return new WP_REST_Response( [ 
+				'success' => true, 
+				'message' => 'OK', 
+				'data' => $robots_txt 
+			], 200 );
+			
+		} catch (Exception $e) {
+			return new WP_REST_Response( [ 'success' => false, 'message' => $e->getMessage() ], 500 );
+		}
+	}
+
+	#endregion
+
+	#region Sitemap
+
+	function rest_sitemap_generate() {
+		try {
+			$path = $this->core->generate_sitemap();
+			return new WP_REST_Response( [ 
+				'success' => true, 
+				'message' => 'Sitemap generated successfully at ' . $path,
+				'data' => [ 'path' => $path ]
+			], 200 );
+		} catch ( Exception $e ) {
+			return new WP_REST_Response( [ 'success' => false, 'message' => $e->getMessage() ], 500 );
+		}
+	}
+
+	#endregion
+
+	#region Analytics
+
+	function rest_get_analytics_data( $request ) {
+		try {
+			$params = $request->get_json_params();
+			$args = array(
+				'post_id' => isset( $params['post_id'] ) ? intval( $params['post_id'] ) : null,
+				'start_date' => isset( $params['start_date'] ) ? $params['start_date'] : null,
+				'end_date' => isset( $params['end_date'] ) ? $params['end_date'] : null,
+				'group_by' => isset( $params['group_by'] ) ? $params['group_by'] : 'day',
+				'limit' => isset( $params['limit'] ) ? intval( $params['limit'] ) : 100
+			);
+			$data = $this->core->get_analytics_data( $args );
+
+			return new WP_REST_Response( [
+				'success' => true,
+				'data' => $data
+			], 200 );
+
+		}
+		catch ( Exception $e ) {
+			return new WP_REST_Response( [
+				'success' => false,
+				'message' => $e->getMessage()
+			], 500 );
+		}
+	}
+
+	function rest_get_analytics_summary( $request ) {
+		try {
+			$params = $request->get_json_params();
+			$start_date = isset( $params['start_date'] ) ? $params['start_date'] : null;
+			$end_date = isset( $params['end_date'] ) ? $params['end_date'] : null;
+			$data = $this->core->get_analytics_summary( $start_date, $end_date );
+
+			return new WP_REST_Response( [
+				'success' => true,
+				'data' => $data
+			], 200 );
+
+		}
+		catch ( Exception $e ) {
+			return new WP_REST_Response( [
+				'success' => false,
+				'message' => $e->getMessage()
+			], 500 );
+		}
+	}
+
+	function rest_get_top_posts( $request ) {
+		try {
+			$params = $request->get_json_params();
+			$args = array(
+				'start_date' => isset( $params['start_date'] ) ? $params['start_date'] : null,
+				'end_date' => isset( $params['end_date'] ) ? $params['end_date'] : null,
+				'limit' => isset( $params['limit'] ) ? intval( $params['limit'] ) : 10
+			);
+			$data = $this->core->get_top_posts( $args );
+
+			return new WP_REST_Response( [
+				'success' => true,
+				'data' => $data
+			], 200 );
+
+		}
+		catch ( Exception $e ) {
+			return new WP_REST_Response( [
+				'success' => false,
+				'message' => $e->getMessage()
+			], 500 );
+		}
+	}
+
+	function rest_check_google_analytics_authenticated() {
+		$is_authenticated = $this->core->get_is_authenticated();
+		return new WP_REST_Response( [
+			'success' => true,
+			'is_authenticated' => $is_authenticated,
+		], 200 );
+	}
+
+	function rest_get_google_analytics_auth() {
+		$auth_url = $this->core->get_google_auth_url();
+		if ( $auth_url ) {
+			return new WP_REST_Response( [
+				'success' => true,
+				'auth_url' => $auth_url
+			], 200 );
+		}
+		else {
+			return new WP_REST_Response( [
+				'success' => false,
+				'message' => 'Failed to get Google Analytics redirect URL.'
+			], 500 );
+		}
+	}
+
+	function rest_unlink_google_analytics() {
+		$res = $this->core->unlink_google_analytics();
+		if ( $res ) {
+			return new WP_REST_Response( [
+				'success' => true,
+				'message' => 'Google Analytics unlinked successfully.'
+			], 200 );
+		}
+		else {
+			return new WP_REST_Response( [
+				'success' => false,
+				'message' => 'Failed to unlink Google Analytics.'
+			], 500 );
+		}
+	}
+
+	function rest_get_google_analytics_data( $request ) {
+		try {
+			$params = $request->get_json_params();
+			$args = array(
+				'start_date' => isset( $params['start_date'] ) ? $params['start_date'] : null,
+				'end_date' => isset( $params['end_date'] ) ? $params['end_date'] : null,
+				'group_by' => isset( $params['group_by'] ) ? $params['group_by'] : 'day',
+				'limit' => isset( $params['limit'] ) ? intval( $params['limit'] ) : 100
+			);
+			$data = $this->core->get_google_analytics_data( $args );
+
+			return new WP_REST_Response( [
+				'success' => true,
+				'data' => $data
+			], 200 );
+
+		}
+		catch ( Exception $e ) {
+			return new WP_REST_Response( [
+				'success' => false,
+				'message' => $e->getMessage()
+			], 500 );
+		}
+	}
+
+	function rest_get_google_analytics_summary( $request ) {
+		try {
+			$params = $request->get_json_params();
+			
+			$start_date = isset( $params['start_date'] ) ? $params['start_date'] : null;
+			$end_date = isset( $params['end_date'] ) ? $params['end_date'] : null;
+
+			$data = $this->core->get_google_analytics_summary( $start_date, $end_date );
+
+			return new WP_REST_Response( [
+				'success' => true,
+				'data' => $data
+			], 200 );
+
+		} catch ( Exception $e ) {
+			return new WP_REST_Response( [
+				'success' => false,
+				'message' => $e->getMessage()
+			], 500 );
+		}
+	}
+
+	function rest_get_google_analytics_top_posts( $request ) {
+		try {
+			$params = $request->get_json_params();
+			
+			$args = array(
+				'start_date' => isset( $params['start_date'] ) ? $params['start_date'] : null,
+				'end_date' => isset( $params['end_date'] ) ? $params['end_date'] : null,
+				'limit' => isset( $params['limit'] ) ? intval( $params['limit'] ) : 10
+			);
+
+			$data = $this->core->get_google_analytics_top_posts( $args );
+
+			return new WP_REST_Response( [
+				'success' => true,
+				'data' => $data
+			], 200 );
+
+		} catch ( Exception $e ) {
+			return new WP_REST_Response( [
+				'success' => false,
+				'message' => $e->getMessage()
+			], 500 );
+		}
+	}
+
+	function rest_get_google_analytics_realtime( $request ) {
+		try {
+			$data = $this->core->get_google_analytics_realtime_data();
+
+			return new WP_REST_Response( [
+				'success' => true,
+				'data' => $data
+			], 200 );
+
+		} catch ( Exception $e ) {
+			return new WP_REST_Response( [
+				'success' => false,
+				'message' => $e->getMessage()
+			], 500 );
+		}
+	}
+
+	#endregion
 }

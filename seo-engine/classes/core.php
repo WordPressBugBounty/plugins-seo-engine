@@ -9,9 +9,15 @@ class Meow_MWSEO_Core
 	public $meta_key_seo_title = '_kiss_seo_title';
 	public $meta_key_seo_excerpt = '_kiss_seo_excerpt';
 	public $meta_key_skip = '_kiss_seo_ignore';
-	public $meta_key_seo_keywords = '_seo_engine_ai_keywords';
+	public $meta_key_seo_keywords = '_seo_ai_keywords';
 
-	private $option_name = 'seo_kiss_options';
+	private $old_option_name = 'seo_kiss_options';
+	private $option_name = 'mwseo_options';
+
+	private $sitemap_module = null;
+	private $insights_module = null;
+	private $analytics_module = null;
+	private $googleanalytics_module = null;
 
 	public function __construct() {
 		$this->site_url = get_site_url();
@@ -19,13 +25,17 @@ class Meow_MWSEO_Core
 
 		add_action( 'plugins_loaded', array( $this, 'init' ) );
 
-		$analyze_on_update = get_option( 'seo_kiss_options' )[ 'seo_engine_analyze_on_update' ] ?? false;
+		$analyze_on_update = $this->get_option( 'analyze_on_update', false );
 		if ( $analyze_on_update ) {
 			add_action( 'save_post', array( $this, 'analyze_on_update' ), 10, 3 );
 		}
 	}
 
 	function init() {
+		global $mwseo;
+
+		$mwseo = new Meow_MWSEO_API( $this );
+
 		// Part of the core, settings and stuff
 		$this->admin = new Meow_MWSEO_Admin( $this );
 
@@ -34,14 +44,21 @@ class Meow_MWSEO_Core
 			new Meow_MWSEO_Rest( $this, $this->admin );
 		}
 
+		// Attachment URL redirection feature
+		$redirect_attachments = $this->get_option( 'redirect_attachments', false );
+		if ( $redirect_attachments ) {
+			add_filter( 'attachment_link', array( $this, 'redirect_attachment_to_parent' ), 10, 2 );
+			add_action( 'template_redirect', array( $this, 'handle_attachment_redirect' ) );
+		}
+
 		// Dashboard
-		$use_mwseo_sitemap = $this->get_option( 'seo_engine_sitemap', false );
+		$use_mwseo_sitemap = $this->get_option( 'sitemap', false );
 		if ( $use_mwseo_sitemap ) {
 			add_filter(
 				'init',
 				function() {
-					$provider = new Meow_MWSEO_Sitemap( $this );
-					wp_register_sitemap_provider( MWSEO_DOMAIN, $provider );
+					$this->sitemap_module = new Meow_MWSEO_Sitemap( $this );
+					wp_register_sitemap_provider( MWSEO_DOMAIN, $this->sitemap_module );
 				}
 			);
 
@@ -55,13 +72,38 @@ class Meow_MWSEO_Core
 
 
 		// Woocommerce
-		if ( $this->get_option( 'seo_engine_woocommerce_assistant', false ) ) {
+		if ( $this->get_option( 'woocommerce_assistant', false ) ) {
 			add_action( 'add_meta_boxes', array( $this, 'add_wc_meta_boxes' ) );
 		}
 
 		// Advanced Core
 		if ( class_exists( 'MeowPro_MWSEO_Core' ) ) {
 			new MeowPro_MWSEO_Core( $this );
+		}
+
+		// Insights
+		if ( class_exists( 'Meow_MWSEO_Modules_Insights' ) ) {
+			$this->insights_module = new Meow_MWSEO_Modules_Insights( $this );
+		}
+
+		// Analytics
+		if ( class_exists( 'Meow_MWSEO_Modules_Analytics' ) ) {
+			$this->analytics_module = new Meow_MWSEO_Modules_Analytics( $this );
+			
+			// Track visits on frontend
+			if ( !is_admin() && !$this->is_rest ) {
+				add_action( 'wp', array( $this, 'track_current_visit' ) );
+			}
+		}
+
+		// Google Analytics
+		if ( class_exists( 'Meow_MWSEO_Modules_GoogleAnalytics' ) ) {
+			$this->googleanalytics_module = new Meow_MWSEO_Modules_GoogleAnalytics( $this );
+		}
+
+		// MCP integration - check both class and global variable
+		if ( class_exists( 'Meow_MWAI_Core' ) || isset( $GLOBALS['mwai'] ) ) {
+			new Meow_MWSEO_MCP( $this );
 		}
 	}
 
@@ -130,7 +172,7 @@ class Meow_MWSEO_Core
 	}
 
 	function log( $data = null ) {
-		$enabled = $this->get_option( 'seo_engine_logs', false );
+		$enabled = $this->get_option( 'logs', false );
 		if ( !$enabled ) { return; }
 
 		$log_file_path = $this->get_logs_path();
@@ -176,7 +218,7 @@ class Meow_MWSEO_Core
 
 
 	function reject_gptbot_user_agent() {
-		$disallow_gpt_bot = get_option( 'seo_kiss_options' )[ 'seo_engine_disallow_gpt_bot' ] ?? false;
+		$disallow_gpt_bot = $this->get_option( 'disallow_gpt_bot', false );
 		if ( $disallow_gpt_bot && isset($_SERVER[ 'HTTP_USER_AGENT' ]) && strpos( $_SERVER[ 'HTTP_USER_AGENT' ], 'GPTBot' ) !== false ) {
 			$this->log( '🤖 GPTBot has been detected and blocked.');
 			header( 'HTTP/1.1 403 Forbidden' );
@@ -186,7 +228,13 @@ class Meow_MWSEO_Core
 
 	function get_post_types() {
 		global $wpdb;
-		return $wpdb->get_col( "SELECT DISTINCT post_type FROM $wpdb->posts" );
+		$post_types = $wpdb->get_col( "SELECT DISTINCT post_type FROM $wpdb->posts" );
+		
+		// Exclude post types that don't need SEO
+		$excluded_types = array( 'revision', 'wp_global_styles', 'wp_navigation' );
+		$post_types = array_diff( $post_types, $excluded_types );
+		
+		return array_values( $post_types );
 	}
 
 	// Make post type list as [ 'post_type_value' => 'post_type_label' ]
@@ -220,7 +268,7 @@ class Meow_MWSEO_Core
 	}	
 
 	function check_title_duplicates($title, $id) {
-		$duplicate_hashes = get_option( 'seo_engine_title_hashes' );
+		$duplicate_hashes = get_option( 'mwseo_title_hashes' );
 		if ( empty( $duplicate_hashes ) ) {
 			$duplicate_hashes = array();
 		}
@@ -236,7 +284,7 @@ class Meow_MWSEO_Core
 				$post = get_post( $duplicate_hashes[ $title_hash ] );
 				if( empty( $post ) || $post->post_status == 'trash') {
 					unset( $duplicate_hashes[ $title_hash ] );
-					update_option( 'seo_engine_title_hashes', $duplicate_hashes );
+					update_option( 'mwseo_title_hashes', $duplicate_hashes );
 					return false;
 				}
 				
@@ -245,205 +293,57 @@ class Meow_MWSEO_Core
 		}
 		else {
 			$duplicate_hashes[ $title_hash ] = $id;
-			update_option( 'seo_engine_title_hashes', $duplicate_hashes );
+			update_option( 'mwseo_title_hashes', $duplicate_hashes );
 			return false;
 		}
 	}
 
 	function analyze_on_update( $post_id, $post, $update ) {
-		$this->calculate_seo_score( $post );
+		global $mwseo_score;
+		if ( $mwseo_score ) {
+			$result = $mwseo_score->calculate( $post );
+			// Save the results
+			update_post_meta( $post->ID, '_seo_score', $result['score'] );
+			update_post_meta( $post->ID, '_seo_status', $result['status'] );
+			update_post_meta( $post->ID, '_seo_message', $result['message'] );
+			update_post_meta( $post->ID, '_seo_codes', isset( $result['errors']['codes'] ) ? $result['errors']['codes'] : [] );
+		}
 	}
 
 
 	// Decides whether or not the post is SEO-friendly or not.
 	function calculate_seo_score( $post ) {
-		if ( get_post_meta( $post->ID, '_seo_engine_status', true ) === 'skip' ) {
+		global $mwseo_score;
+		if ( !$mwseo_score ) {
+			return [ 'status' => 'error', 'message' => 'Score module not initialized.' ];
+		}
+		
+		if ( get_post_meta( $post->ID, '_seo_status', true ) === 'skip' ) {
 			$this->log( "🚫 Post (#{$post->ID}) was skipped." );
 			return [ 'status' => 'skip', 'message' => 'Skipped.' ];
 		}
-
-		$number_of_tests = 0;
-		$errors = [
-			'messages' => array(),
-			'codes' => array(),
-		];
-		$info_messages = [];
-		$this->log( "🔍 Analyzing post (#{$post->ID})... " );
-
-		// Check if title is unique
-		$this->log( "🔠 Checking if the title is unique." );
-		$number_of_tests++;
-		$has_title = !empty( $post->post_title );
-
-		if ( !$has_title ){
-			$this->log( "🟢 Matched issue. " );
-			$errors = [
-				'messages' => [ ...$errors['messages'] ,  'The post does not have a title.' ],
-				'codes' => [ ...$errors['codes'] ,  'title_missing' ],
-			];
-		}
-		else if ( $this->check_title_duplicates( $post->post_title, $post->ID ) ) {
-			$this->log( "🟢 Matched issue. " );
-			$errors = [
-				'messages' => [ ...$errors['messages'] ,  'The title is not unique.' ],
-				'codes' => [ ...$errors['codes'] ,  'title_not_unique' ],
-			];
-		}
-
-		// Title for SEO should be between 10 and 70 chars.
-		$this->log( "🔠 Checking if the title is between 10 and 70 characters." );
-		$number_of_tests++;
-		$seo_title = $this->build_title( $post );
-		$seo_title_length = strlen( $seo_title );
-		if ( $seo_title_length < 10 || $seo_title_length > 80 ) {
-			$this->log( "🟢 Matched issue. " );
-			$errors = [
-				'messages' => [ ...$errors['messages'] ,  sprintf( "Title (for SEO) should be between 10 and 70 characters (80 max). Currently %s characters.", $seo_title_length ) ],
-				'codes' => [ ...$errors['codes'] ,  'title_seo_length' ],
-			];
-		}
-
-
-		// Excerpt should exist
-		$this->log( "🔠 Checking if the excerpt exists." );
-		$number_of_tests++;
-		if ( empty( $post->post_excerpt ) ) {
-			$this->log( "🟢 Matched issue. " );
-			$errors = [
-				'messages' => [ ...$errors['messages'] ,  'Excerpt is missing.' ],
-				'codes' => [ ...$errors['codes'] ,  'excerpt_missing' ],
-			];
-		}
-
-		// Excerpt for SEO should be between 10 and 160 chars.
-		$this->log( "🔠 Checking if the excerpt is between 10 and 160 characters." );
-		$number_of_tests++;
-		$seo_excerpt = $this->build_excerpt( $post );
-		$seo_excerpt_length = strlen( $seo_excerpt );
-		if ( $seo_excerpt_length < 10 || $seo_excerpt_length > 160 ) {
-			$this->log( "🟢 Matched issue. " );
-			$errors = [
-				'messages' => [ ...$errors['messages'] ,  sprintf( "Excerpt (for SEO) should be between 10 and 160 characters (180 max). Currently %s characters.", $seo_excerpt_length ) ],
-				'codes' => [ ...$errors['codes'] ,  'excerpt_seo_length' ],
-			];
-		}
-
-		// Slug must be less than 64 characters.
-		$this->log( "🔠 Checking if the slug is less than 64 characters." );
-		$number_of_tests++;
-		if ( strlen( $post->post_name ) > 64 ) {
-			$this->log( "🟢 Matched issue. " );
-			$errors = [
-				'messages' => [ ...$errors['messages'] ,  sprintf( "The slug should be less than 64 characters. Currently %s characters.", strlen( $post->post_name ) ) ],
-				'codes' => [ ...$errors['codes'] ,  'slug_length' ],
-			];
-		}
-
-		// Slug must be less than 6 words.
-		$this->log( "🔠 Checking if the slug is less than 6 words." );
-		$number_of_tests++;
-		$words = explode( '-', $post->post_name );
-		if ( count( $words ) > 6 ) {
-			$this->log( "🟢 Matched issue. " );
-			$errors = [
-				'messages' => [ ...$errors['messages'] ,  sprintf( "The slug should be less than 5 words. Currently %s words.", count( $words ) ) ],
-				'codes' => [ ...$errors['codes'] ,  'slug_words' ],
-			];
-		}
-
-
-		// Check if the post is long enough.
-		$this->log( "🔠 Checking if the post is long enough." );
-		$number_of_tests++;
-		if ( str_word_count( $post->post_content ) < 300 ) {
-			$this->log( "🟢 Matched issue. " );
-			$errors = [
-				'messages' => [ ...$errors['messages'] ,  sprintf( "The post is too short. It should be at least 300 words. Currently %s words.", str_word_count( $post->post_content ) ) ],
-				'codes' => [ ...$errors['codes'] ,  'post_too_short' ],
-			];
-		}
-
-		// Check if all images have alt text. check_images_alt_text
-		$this->log( "🔠 Checking if all images have alt text." );
-		$number_of_tests++;
-		$alt_count = count( $this->check_images_alt_text( $post->post_content ) );
-		if( $alt_count != 0  ) {
-			$this->log( "🟢 Matched issue. " );
-			$errors = [
-				'messages' => [ ...$errors['messages'] ,  sprintf( "You have %s image%s without alt text.", $alt_count, ( $alt_count >= 2 ? 's' : '' ) ) ],
-				'codes' => [ ...$errors['codes'] ,  'images_missing_alt_text' ],
-			];
-		}
-
-		// Check if the post includes a few internal and external links.
-		$this->log( "🔠 Checking if the post includes a few internal and external links." );
-		$number_of_tests++;
-		$links = $this->check_links( $post->post_content );
-		if ( $links[ 'total' ] == 0 ) {
-			$this->log( "🟢 Matched issue. " );
-			$errors = [
-				'messages' => [ ...$errors['messages'] ,  'The post should include a few internal and external links.' ],
-				'codes' => [ ...$errors['codes'] ,  'links_missing' ],
-			];
-		}
-		else {
-			$info_messages[] = sprintf( "The post includes %s internal and %s external links.", $links[ 'internal' ], $links[ 'external' ] );
-		}
-
-		// Check the readability score.
-		$this->log( "🔠 Checking the readability score." );
-		$number_of_tests++;
-		$readability_module = new Meow_MWSEO_Modules_Readability();
-		$readability = $readability_module->calculate_readability( $post->post_content );
-		if ( $readability != 0 ) {
-
-			$readability_message = sprintf( "The post's readability score is %s%%, it's %s", $readability[ 'flesch_kincaid' ], $readability[ 'grade' ] );
-			$readability_treshold = get_option( 'seo_kiss_options' )[ 'seo_engine_readability_treshold' ] ?? 50;
-
-			if( $readability[ 'flesch_kincaid' ] < $readability_treshold ){
-				$this->log( "🟢 Matched issue. " );
-				$errors = [
-					'messages' => [ ...$errors['messages'] ,  $readability_message . ' Aim for a score above ' . $readability_treshold . '%.' ],
-					'codes' => [ ...$errors['codes'] ,  'readability_score' ],
-				];
-			}
-			else {
-				$info_messages[] = $readability_message;
-			}
-
-		}
-
-		// Many more to go...
-		if( !empty( $errors['messages'] ) ) {
-			$score = round( ( ( $number_of_tests - count( $errors['messages'] ) ) / $number_of_tests ) * 100 );
-			$error_messages = implode( "\n\n• ", $errors['messages'] );
-			
-			$this->log( "🔴 Post (#{$post->ID}) is not SEO-friendly. " );
-			$result = ['score' => $score ,'status' => 'error', 'message' => '• ' . $error_messages, 'codes' => $errors['codes'] ];
-		}
-		else {
-			$info_messages = implode( "\n\n• ", $info_messages );
-			$this->log( "🟢 Post (#{$post->ID}) is SEO-friendly. " );
-			$result = ['score' => 100 ,'status' => 'ok', 'message' => 'The post is SEO-friendly. 😻 ' . $info_messages, 'codes' => [] ];
-		}
-
-		update_post_meta( $post->ID, '_seo_engine_score', $result['score'] );
-		update_post_meta( $post->ID, '_seo_engine_status', $result['status'] );
-		update_post_meta( $post->ID, '_seo_engine_message', $result['message'] );
-		update_post_meta( $post->ID, '_seo_engine_codes', $result['codes'] );
-
+		
+		$result = $mwseo_score->calculate( $post );
+		
+		// Save the results
+		update_post_meta( $post->ID, '_seo_score', $result['score'] );
+		update_post_meta( $post->ID, '_seo_status', $result['status'] );
+		update_post_meta( $post->ID, '_seo_message', $result['message'] );
+		update_post_meta( $post->ID, '_seo_codes', isset( $result['errors']['codes'] ) ? $result['errors']['codes'] : [] );
+		
 		return $result;
-
 	}
 
 	function get_all_posts_with_seo_score() {
 
-		// Both are set to true, to see the bigger picture. If user prefers to see a custom view, we can add options for them later.
-		$show_unscored_posts = true; // get_option( 'seo_kiss_options' )[ 'seo_engine_show_unscored_chart' ] ?? false;
-		$show_any_post_type = true;  // get_option( 'seo_kiss_options' )[ 'seo_engine_show_any_post_type' ] ?? false;
+		// $show_unscored_posts = $this->get_option( 'show_unscored_chart', false );
+		// $show_any_post_type  = $this->get_option( 'show_any_post_type',  false );
 
-		$meta_query = $show_unscored_posts ? [] : [ 'key' => '_seo_engine_score', 'compare' => 'EXISTS' ];
-		$default_post_type = get_option( 'seo_kiss_options' )[ 'seo_engine_default_post_type' ] ?? 'post';
+		$show_any_post_type  = false;
+		$show_unscored_posts = true;
+
+		$meta_query = $show_unscored_posts ? [] : [ 'key' => '_seo_score', 'compare' => 'EXISTS' ];
+		$default_post_type = $this->get_option( 'default_post_type', 'post' );
 		$post_type = $show_any_post_type ? 'any' : $default_post_type;
 
 		$args = array(
@@ -459,8 +359,8 @@ class Meow_MWSEO_Core
 		$posts_with_seo_score = array();
 		
 		foreach ( $posts as $post ) {
-			$seo_score = get_post_meta( $post->ID, '_seo_engine_score', true );
-			$seo_status = get_post_meta( $post->ID, '_seo_engine_status', true );
+			$seo_score = get_post_meta( $post->ID, '_seo_score', true );
+			$seo_status = get_post_meta( $post->ID, '_seo_status', true );
 
 
 			$posts_with_seo_score[] = array(
@@ -501,10 +401,10 @@ class Meow_MWSEO_Core
 
 		$post_id = $post->ID;
 
-		$score = get_post_meta( $post_id, '_seo_engine_score', true );
-		$status = get_post_meta( $post_id, '_seo_engine_status', true );
-		$message = get_post_meta( $post_id, '_seo_engine_message', true );
-		$codes = get_post_meta( $post_id, '_seo_engine_codes', true );
+		$score = get_post_meta( $post_id, '_seo_score', true );
+		$status = get_post_meta( $post_id, '_seo_status', true );
+		$message = get_post_meta( $post_id, '_seo_message', true );
+		$codes = get_post_meta( $post_id, '_seo_codes', true );
 
 		if( !$status ) { $status = 'pending'; }
 		if( !$message ) { $message = 'Start an analysis to get a score.'; }
@@ -762,7 +662,7 @@ class Meow_MWSEO_Core
 
 		$magic_fix_module = new Meow_MWSEO_Modules_MagicFix( $post, $this );
 		
-		$fix_to_ignore = get_option( 'seo_kiss_options' )[ 'seo_engine_select_magic_fix' ] ?? [ ];
+		$fix_to_ignore = $this->get_option( 'select_magic_fix' , [] );
 		$errors = array_diff( $errors, $fix_to_ignore );
 
 		foreach ( $errors as $error_key => $error) {
@@ -802,8 +702,33 @@ class Meow_MWSEO_Core
 						$magic_fix_module->magic_fix_images_missing_alt_text( $images );
 
 					break;
+				case 'links_missing_external':
+
+					$res = $magic_fix_module->magic_fix_links_missing( 'external' );
+
+					if ( !isset( $magic_fixes['links_missing'] ) ){
+						$magic_fixes['links_missing'] = $res;
+					} else {
+						$magic_fixes['links_missing']['value'] .= $res['value'];
+					}
+
+					
+					break;
+				case 'links_missing_internal':
+					$res = $magic_fix_module->magic_fix_links_missing( 'internal' );
+
+					if ( !isset( $magic_fixes['links_missing'] ) ){
+						$magic_fixes['links_missing'] = $res;
+					} else {
+						$magic_fixes['links_missing']['value'] .= $res['value'];
+					}
+
+					break;
 				case 'links_missing':
-					$magic_fixes['links_missing'] = $update_post ? $magic_fix_module->magic_fix_links_missing_update_post( $error[ 'value' ] ) : $magic_fix_module->magic_fix_links_missing(  );
+					if ( !$update_post ) break;
+
+					$magic_fixes['links_missing'] = $magic_fix_module->magic_fix_links_missing_update_post( $error[ 'value' ] );
+					
 					break;
 				default:
 					break;
@@ -819,11 +744,11 @@ class Meow_MWSEO_Core
 	 *
 	 */
 	function can_access_settings() {
-		return apply_filters( 'seo_engine_allow_setup', current_user_can( 'manage_options' ) );
+		return apply_filters( 'mwseo_allow_setup', current_user_can( 'manage_options' ) );
 	}
 
 	function can_access_features() {
-		return apply_filters( 'seo_engine_allow_usage', current_user_can( 'administrator' ) );
+		return apply_filters( 'mwseo_allow_usage', current_user_can( 'administrator' ) );
 	}
 
 	#region Options
@@ -836,51 +761,51 @@ class Meow_MWSEO_Core
 	function sanitized_options(){
 		$options = $this->get_all_options();
 		
-		$options['seo_engine_post_types'] = $this->make_post_type_list( $this->get_post_types() );
+		$options['post_types'] = $this->make_post_type_list( $this->get_post_types() );
 
-		if ( $options['seo_engine_language'] == 'auto' || empty( $options['seo_engine_language'] ) ) {
-			$options['seo_engine_language'] = $this->get_language_name( get_locale() ) ?? 'English';
+		if ( $options['language'] == 'auto' || empty( $options['language'] ) ) {
+			$options['language'] = $this->get_language_name( get_locale() ) ?? 'English';
 		}
 
-		if ( empty( $options['seo_engine_readability_treshold'] ) ) {
-			$options['seo_engine_readability_treshold'] = 50;
+		if ( empty( $options['readability_treshold'] ) ) {
+			$options['readability_treshold'] = 50;
 		}
 
 		// AI Engine
 		global $mwai;
 
 		if( is_null( $mwai ) || !isset( $mwai ) ) {
-			$options['seo_engine_ai_engine_status'] = false;
-			$options['seo_engine_ai_engine_message'] = 'AI Engine is not available.';
+			$options['ai_engine_status'] = false;
+			$options['ai_engine_message'] = 'AI Engine is not available.';
 		}
 		else {
 
 			try{
-				$options['seo_engine_ai_engine_status'] = true;
-				$options['seo_engine_ai_engine_message'] = $mwai->checkStatus();
+				$options['ai_engine_status'] = true;
+				$options['ai_engine_message'] = $mwai->checkStatus();
 			}
 			catch ( Exception $e ) {
-				$options['seo_engine_ai_engine_status'] = false;
-				$options['seo_engine_ai_engine_message'] = $e->getMessage();
+				$options['ai_engine_status'] = false;
+				$options['ai_engine_message'] = $e->getMessage();
 			}
 		}
 
 		// AI Features
-		if ( !$options['seo_engine_ai_engine_status'] ) {
+		if ( !$options['ai_engine_status'] ) {
 			// Disable all AI related features
-			$options['seo_engine_ai_magic_fix'] = false;
-			$options['seo_engine_ai_auto_correct'] = false;
-			$options['seo_engine_ai_magic_wand'] = false;
-			$options['seo_engine_ai_web_scraping'] = false;
-			$options['seo_engine_ai_keywords'] = false;
-			$options['seo_engine_woocommerce_assistant'] = false;
+			$options['ai_magic_fix'] = false;
+			$options['ai_auto_correct'] = false;
+			$options['ai_magic_wand'] = false;
+			$options['ai_web_scraping'] = false;
+			$options['ai_keywords'] = false;
+			$options['woocommerce_assistant'] = false;
 		}
 
 		// SE Ranking
 
 
 		// Sitemap
-		if ( $options['seo_engine_disable_wp_sitemap'] ) {
+		if ( $options['disable_wp_sitemap'] ) {
 
 		}
 
@@ -890,78 +815,178 @@ class Meow_MWSEO_Core
 	}
 
 	function list_options() {
-
 		return array(
-			//POST TYPES
-			'seo_engine_default_post_type' => 'post',
-			'seo_engine_posts_limit' => 10,
-			'seo_engine_post_types' => $this->make_post_type_list( $this->get_post_types() ),
-			'seo_engine_select_post_types' => ['post'],
+			// Module Toggles
+			'content_seo' => true,
+			'technical_seo' => true,
+
+			'speed_and_vitals' => false,
+			'analytics' => false,
 			
-
-			//PREFERENCES
-			'seo_engine_readability_treshold' => 50,
-			//get_locale to full language name
-			'seo_engine_language' => $this->get_language_name( get_locale() ) ?? 'English',
-			'seo_engine_disallow_gpt_bot' => false,
-			'seo_engine_analyze_on_update' => false,
-			'seo_engine_analyze_buffer' => 10,
-			'seo_engine_analyze_buffer_interval' => 0,
-			'seo_engine_logs' => false,
-
-			//SITEMAP
-			'seo_engine_sitemap' => false,
-			'seo_engine_disable_wp_sitemap' => false,
-			'seo_engine_sitemap_custom' => false,
-			'seo_engine_sitemap_exclude_users_provider' => false,
-			'seo_engine_sitemap_exclude_posts_provider' => false,
-			'seo_engine_sitemap_exclude_taxonomies_provider' => false,
-			'seo_engine_sitemap_excluded_post_types' => [],
-			'seo_engine_sitemap_excluded_taxonomies' => [],
-			'seo_engine_sitemap_excluded_post_ids' => [],
-			'seo_engine_taxonomies' => $this->make_taxonomy_list( $this->get_taxonomies() ),
-			'seo_engine_sitemap_max_urls' => 100,
-			'seo_engine_sitemap_post_max_pages' => 100,
-
-			//SNS
-			'seo_engine_social_networks' => false,
-
-			//RANKING
-			'seo_engine_google_ranking' => false,
-			'seo_engine_google_api_key' => '',
-			'seo_engine_google_programmable_search_engine' => '',
-			'seo_engine_google_interval_hours' => 24,
-			'seo_engine_google_search_depth' => 3,
-			'seo_engine_google_track_points' => 60,
-
-			//AI PARAMETERS
-			'seo_engine_ai_engine_status' => false,
-			'seo_engine_ai_engine_message' => '',
-			'seo_engine_ai_magic_fix' => false,
-			'seo_engine_ai_auto_correct' => false,
-			'seo_engine_select_magic_fix' => [
+			// Content SEO
+			'default_post_type' => 'post',
+			'posts_limit' => 10,
+			'post_types' => $this->make_post_type_list( $this->get_post_types() ),
+			'select_post_types' => ['post'],
+			'readability_treshold' => 50,
+			'language' => $this->get_language_name( get_locale() ) ?? 'English',
+			'analyze_on_update' => false,
+			'analyze_buffer' => 10,
+			'analyze_buffer_interval' => 0,
+			
+			// Technical SEO
+			'sitemap' => false,
+			'disable_wp_sitemap' => false,
+			'sitemap_custom' => false,
+			'sitemap_style' => 'default',
+			'sitemap_path' => '',
+			'sitemap_exclude_users_provider' => false,
+			'sitemap_exclude_posts_provider' => false,
+			'sitemap_exclude_taxonomies_provider' => false,
+			'sitemap_excluded_post_types' => [],
+			'sitemap_excluded_taxonomies' => [],
+			'sitemap_excluded_post_ids' => [],
+			'sitemap_max_urls' => 100,
+			'sitemap_post_max_pages' => 100,
+			'taxonomies' => $this->make_taxonomy_list( $this->get_taxonomies() ),
+			'robot_editor' => false,
+			'disallow_gpt_bot' => false,
+			
+			// Social Networks
+			'social_networks' => false,
+			'social_networks_twitter' => '',
+			'social_networks_facebook_app_id' => '',
+			
+			// Search Visibility
+			'google_ranking' => false,
+			
+			// Google Cloud / API
+			'google_api_key' => '',
+			'google_programmable_search_engine' => '',
+			'google_interval_hours' => 24,
+			'google_search_depth' => 3,
+			'google_track_points' => 60,
+			
+			// Analytics Configuration
+			'analytics_method' => 'none', // 'none', 'private', 'google'
+			
+			// Private Analytics
+			'general_analytics' => false,
+			'analytics_track_logged_users' => false,
+			'analytics_track_power_users' => false,
+			'analytics_privacy' => false,
+			
+			// Google Analytics
+			'google_analytics_cache' => true,
+			'google_analytics' => false,
+			'google_analytics_property_ids' => [],
+			'google_analytics_property_id' => '',
+			'google_analytics_client_secret' => '',
+			'google_analytics_client_id' => '',
+			'google_analytics_tracking_ids' => [],
+			'google_analytics_track_logged_users' => false,
+			'google_analytics_track_power_users' => false,
+			'google_analytics_tracking_disabled' => false,
+			
+			// AI Features
+			'ai_engine_status' => false,
+			'ai_engine_message' => '',
+			'ai_magic_fix' => false,
+			'ai_auto_correct' => false,
+			'ai_magic_wand' => false,
+			'ai_web_scraping' => false,
+			'ai_keywords' => false,
+			'woocommerce_assistant' => false,
+			'select_magic_fix' => [
 				'readability_score',
 			],
-
-			'seo_engine_ai_magic_wand' => false,
-			'seo_engine_ai_web_scraping' => false,
-			'seo_engine_ai_keywords' => false,
+			
+			// Score Factors
+			'score_check_title_exists' => true,
+			'score_check_title_unique' => true,
+			'score_check_title_length' => true,
+			'score_check_excerpt_exists' => true,
+			'score_check_excerpt_length' => true,
+			'score_check_slug_length' => true,
+			'score_check_slug_words' => true,
+			'score_check_content_length' => true,
+			'score_check_images_alt' => true,
+			'score_check_links' => true,
+			'score_check_readability' => true,
+			
+			// Maintenance & Others
+			'logs' => false,
+			'hide_dashboard_message' => false,
+			'mcp_support' => false,
 		);
 	}
 
-	function get_all_options() {
-		$options = get_option( $this->option_name, null );
-
-		// TODO: Delete this after July 2024
-		if ( is_array( $options ) ) {
-			$options = array_combine( array_map( function( $key ) {
-				return str_replace( 'seo_kiss_', 'seo_engine_', $key );
-			}, array_keys( $options ) ), $options );
+	// TODO: Delete after January 2026
+	function migrate_option_names( $options ) {
+		// Create a new array with migrated keys
+		$migrated_options = array();
+		
+		foreach ( $options as $key => $value ) {
+			// Check if the key starts with 'seo_engine_'
+			if ( strpos( $key, 'seo_engine_' ) === 0 ) {
+				// Remove 'seo_engine_' prefix
+				$new_key = substr( $key, 11 );
+				$migrated_options[$new_key] = $value;
+			} else {
+				// Keep the key as is if it doesn't have the prefix
+				$migrated_options[$key] = $value;
+			}
 		}
+		
+		// Save the migrated options
+		update_option( $this->option_name, $migrated_options, false );
+		
+		// Also migrate WordPress native options
+		$this->migrate_native_options();
+		
+		return $migrated_options;
+	}
 
+	// TODO: Delete after January 2026
+	function migrate_native_options() {
+		// Migrate title hashes
+		$old_title_hashes = get_option( 'seo_engine_title_hashes' );
+		if ( $old_title_hashes !== false ) {
+			update_option( 'mwseo_title_hashes', $old_title_hashes );
+			delete_option( 'seo_engine_title_hashes' );
+		}
+		
+		// Migrate searches (from premium module)
+		$old_searches = get_option( 'seo_engine_searches' );
+		if ( $old_searches !== false ) {
+			update_option( 'mwseo_searches', $old_searches );
+			delete_option( 'seo_engine_searches' );
+		}
+		
+		// Add any other native options that need migration here
+	}
+
+	function get_all_options() {
+
+		// TODO: Delete after January 2026
+		$old_options = get_option( $this->old_option_name, null );
+		if ( $old_options ) {
+			// Migrate old options to new option name
+			update_option( $this->option_name, $old_options, false );
+			delete_option( $this->old_option_name );
+
+			$options = $old_options;
+		} else {
+			$options = get_option( $this->option_name, null );
+		}
+		
+		// Check if we need to migrate from old option names
+		if ( $options && isset( $options['default_post_type'] ) ) {
+			$options = $this->migrate_option_names( $options );
+		}
+		
 		// Make sure every option is set
 		$options = wp_parse_args( $options, $this->list_options() );
-
 		return $options;
 	}
 
@@ -1002,7 +1027,7 @@ class Meow_MWSEO_Core
 		}
 
 		$prompt  = "Here is the product: {PRODUCT}\n\nBased on the product, write a description of this product (between 120 and 240 words), a short description (between 20-49 words), a SEO-friendly title, and tags (separated by commas). Write it in {LANGUAGE}.";
-		$prompt  = apply_filters( 'seo_engine_woocommerce_prompt', $prompt );
+		$prompt  = apply_filters( 'mwseo_woo_product_prompt', $prompt );
 		$prompt .= "Use this keys: description, short_description, seo_title, tags.";
 
 		$prompt = str_replace( '{PRODUCT}',  $params['product'],  $prompt );
@@ -1019,7 +1044,7 @@ class Meow_MWSEO_Core
 
 	function import_yoast() {
 		// For all the selected post types, get the _yoast_wpseo_title & _yoast_wpseo_metadesc	and import them to _kiss_seo_title & _kiss_seo_excerpt
-		$post_types = $this->get_option( 'seo_engine_select_post_types', array( 'post ') );
+		$post_types = $this->get_option( 'select_post_types', array( 'post ') );
 		$posts = get_posts( array(
 			'post_type' => $post_types,
 			'posts_per_page' => -1,
@@ -1057,9 +1082,49 @@ class Meow_MWSEO_Core
 		return count( $posts );
 	}
 
+	function get_seo_title( $post ) {
+		$seo_title = get_post_meta( $post->ID, $this->meta_key_seo_title, true );
+		if ( empty( $seo_title ) ) {
+			$seo_title = $this->build_title( $post );
+		}
+		return $seo_title;
+	}
+
+	function set_seo_title( $post, $title ) {
+		if ( empty( $title ) ) {
+			return false;
+		}
+		$title = trim( strip_tags( $title ) );
+		if ( empty( $title ) ) {
+			return false;
+		}
+		update_post_meta( $post->ID, $this->meta_key_seo_title, $title );
+		return true;
+	}
+
+	function get_seo_excerpt( $post ) {
+		$seo_excerpt = get_post_meta( $post->ID, $this->meta_key_seo_excerpt, true );
+		if ( empty( $seo_excerpt ) ) {
+			$seo_excerpt = $this->build_excerpt( $post );
+		}
+		return $seo_excerpt;
+	}
+
+	function set_seo_excerpt( $post, $excerpt ) {
+		if ( empty( $excerpt ) ) {
+			return false;
+		}
+		$excerpt = trim( strip_tags( $excerpt ) );
+		if ( empty( $excerpt ) ) {
+			return false;
+		}
+		update_post_meta( $post->ID, $this->meta_key_seo_excerpt, $excerpt );
+		return true;
+	}
+
 	function import_rank_math() {
 		// For all the selected post types, get the _rank_math_title & _rank_math_description and import them to _kiss_seo_title & _kiss_seo_excerpt
-		$post_types = $this->get_option( 'seo_engine_select_post_types', array( 'post ') );
+		$post_types = $this->get_option( 'select_post_types', array( 'post ') );
 		$posts = get_posts( array(
 			'post_type' => $post_types,
 			'posts_per_page' => -1,
@@ -1187,6 +1252,236 @@ class Meow_MWSEO_Core
 		else {
 			return null;
 		}
+	}
+
+	#endregion
+
+	/**
+	 * Redirect attachment URLs to their parent post URLs
+	 */
+	public function redirect_attachment_to_parent( $link, $post_id ) {
+		$attachment = get_post( $post_id );
+		if ( $attachment && $attachment->post_type === 'attachment' && $attachment->post_parent ) {
+			return get_permalink( $attachment->post_parent );
+		}
+		return $link;
+	}
+
+	/**
+	 * Handle attachment page redirects to parent post
+	 */
+	public function handle_attachment_redirect()
+	{
+		if ( is_attachment() ) {
+			global $post;
+
+			if ( $post && $post->post_parent ) {
+				wp_safe_redirect( esc_url( get_permalink( $post->post_parent ) ), 301 ) ;
+			} else {
+				wp_safe_redirect ( esc_url( home_url( '/' ) ), 301 );
+			}
+		}
+	}
+
+	#region Sitemap
+
+	function generate_sitemap() {
+		if ( !isset( $this->sitemap_module ) ) {
+			return false;
+		}
+
+		return $this->sitemap_module->create_sitemap();
+	}
+
+
+	#endregion
+
+	#region Robots.txt
+
+	function get_robots_txt() {
+		$robotsTxt = '';
+		$robots_path = ABSPATH . 'robots.txt';
+		$source = 'none';
+		
+		if ( file_exists( $robots_path ) ) {
+			$robotsTxt = file_get_contents( $robots_path );
+			$source = 'file';
+		} else {
+			// Get the default WordPress robots.txt content
+			ob_start();
+			do_robots();
+			$robotsTxt = ob_get_clean();
+			$source = 'default';
+		}
+
+		return [
+			'content' => $robotsTxt,
+			'source' => $source,
+			'path' => $robots_path,
+		];
+	}
+
+	function set_robots_txt( $content ) {
+		$robots_path = ABSPATH . 'robots.txt';
+		
+		$result = file_put_contents($robots_path, $content);
+		return $result !== false;
+	}
+
+	#endregion
+
+	#region Performance Insights
+
+	function get_speed_and_vitals( $post_id ) {
+		$result = $this->insights_module->get_insights_for_post( $post_id );
+
+		return $result;
+	}
+
+	function get_last_insights() {
+		$last_insights = $this->insights_module->get_last_insights();
+		if ( !is_array( $last_insights ) ) {
+			return [];
+		}
+
+		return $last_insights;
+	}
+
+	#endregion
+
+	#region Analytics
+
+	function track_current_visit() {
+		if ( !isset( $this->analytics_module ) ) {
+			return;
+		}
+
+		// Only track single posts and pages
+		if ( is_singular() ) {
+			global $post;
+			if ( $post && $post->ID ) {
+				$this->analytics_module->track_visit( $post->ID );
+			}
+		}
+	}
+
+	function get_analytics_data( $args = array() ) {
+		if ( !isset( $this->analytics_module ) ) {
+			return array();
+		}
+
+		return $this->analytics_module->get_analytics_data( $args );
+	}
+
+	function get_analytics_summary( $start_date = null, $end_date = null ) {
+		if ( !isset( $this->analytics_module ) ) {
+			return array();
+		}
+
+		return $this->analytics_module->get_analytics_summary( $start_date, $end_date );
+	}
+
+	function get_top_posts( $args = array() ) {
+		if ( !isset( $this->analytics_module ) ) {
+			return array();
+		}
+
+		return $this->analytics_module->get_top_posts( $args );
+	}
+
+	#endregion
+
+	#region Google Analytics
+	function get_google_analytics_state() {
+		if ( !class_exists( 'Meow_MWSEO_Modules_GoogleAnalytics' ) ) {
+			return [];
+		}
+
+		// Get property_id with fallback to first element of property_ids array
+		$property_id = $this->get_option( 'google_analytics_property_id', '' );
+		if ( empty( $property_id ) ) {
+			$property_ids = $this->get_option( 'google_analytics_property_ids', [] );
+			if ( !empty( $property_ids ) && is_array( $property_ids ) ) {
+				$property_id = $property_ids[0];
+				$this->update_option( 'google_analytics_property_id', $property_id );
+			}
+		}
+
+		return [
+			'redirect_url' => $this->get_google_redirect_url(),
+			'property_id' => $property_id,
+		];
+	}
+
+
+	function unlink_google_analytics() {
+		if ( !isset( $this->googleanalytics_module ) ) {
+			return false;
+		}
+
+		return $this->googleanalytics_module->unlink();
+	}
+
+	function get_is_authenticated() {
+		if ( !isset( $this->googleanalytics_module ) ) {
+			return false;
+		}
+
+		// Refresh the options
+		$this->googleanalytics_module->init();
+
+		return $this->googleanalytics_module->is_authenticated();
+	}
+
+	function get_google_auth_url() {
+		if ( !isset( $this->googleanalytics_module ) ) {
+			return '';
+		}
+
+		// Refresh the options 
+		$this->googleanalytics_module->init();
+
+		return $this->googleanalytics_module->get_auth_url();
+	}
+
+	function get_google_redirect_url() {
+		if ( !isset( $this->googleanalytics_module ) ) {
+			return '';
+		}
+		
+		return $this->googleanalytics_module->get_redirect_url();
+	}
+
+	function get_google_analytics_data( $args = array() ) {
+		if ( !isset( $this->googleanalytics_module ) ) {
+			return array();
+		}
+
+		return $this->googleanalytics_module->get_analytics_data( $args );
+	}
+
+	function get_google_analytics_summary( $start_date = null, $end_date = null ) {
+		if ( !isset( $this->googleanalytics_module ) ) {
+			return array();
+		}
+
+		return $this->googleanalytics_module->get_analytics_summary( $start_date, $end_date );
+	}
+
+	function get_google_analytics_top_posts( $args = array() ) {
+		if ( !isset( $this->googleanalytics_module ) ) {
+			return array();
+		}
+
+		return $this->googleanalytics_module->get_top_posts( $args );
+	}
+
+	function get_google_analytics_realtime_data() {
+		if ( !isset( $this->googleanalytics_module ) ) {
+			return array();
+		}
+
+		return $this->googleanalytics_module->get_realtime_data();
 	}
 
 	#endregion

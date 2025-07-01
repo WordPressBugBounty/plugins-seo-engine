@@ -43,11 +43,11 @@ class Meow_MWSEO_Modules_Readability
 	}
 
     // Mainly for English.
-	function count_syllables( $word ) {
+	//TODO: actually get the language from the settings
+	function count_syllables( $word, $language = 'english' ) {
 		$word = strtolower( trim( $word ) );
 		if ( strlen( $word ) <= 3 ) { return 1; }
 
-		$language = get_option( 'seo_kiss_options', null )[ 'seo_engine_language' ] ?? 'English';
 
 		$word = preg_replace( '/[^a-z]/is', '', $word );
 		$vowels = $this->getVowels( $language );

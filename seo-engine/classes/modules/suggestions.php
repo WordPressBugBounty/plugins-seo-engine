@@ -3,16 +3,23 @@
 class Meow_MWSEO_Modules_Suggestions
 {
     public static function prompt($post, $field, $customContent = null, $max_tokens = 500, $meta_key_seo_title = '_kiss_seo_title', $meta_key_seo_excerpt = '_kiss_seo_excerpt' ){
+		$core = new Meow_MWSEO_Core();
+		global $mwai;
 
-		$language = get_option( 'seo_kiss_options', null )[ 'seo_engine_language' ] ?? 'English';
-		$ai_keywords = get_option( 'seo_kiss_options', null )[ 'seo_engine_ai_keywords' ] ?? false;
+		if (is_null( $mwai ) || !isset( $mwai ) ) {
+			$core->log( "⚠️ Missing AI Engine." );
+			return false;
+		}
+
+		$language = get_option( 'mwseo_options', null )[ 'default_language' ] ?? 'English';
+		$ai_keywords = get_option( 'mwseo_options', null )[ 'ai_keywords' ] ?? false;
 
 		$originalContent = $customContent?? Meow_MWSEO_Modules_Suggestions::get_post_sample_context( $post );
 		$prompt = "";
 		$max_tokens = $max_tokens;
 		$expected_size = 0;
 
-		$core = new Meow_MWSEO_Core();
+		
 
 		switch ($field){
 			//EDIT FIELDS
@@ -49,8 +56,58 @@ class Meow_MWSEO_Modules_Suggestions
 			case 'magic_fix_images_missing_alt_text':
 				$prompt = sprintf( "Given the original title: \"%s\" and paragraph above the image : \"%s\", create a new, SEO-friendly description that will add alt text to the image. (one sentence with 5 to 10 words max). New alt text could be :", $post->post_title, $originalContent );
 				break;
-			case 'links_missing':
-			case 'magic_fix_links_missing':
+			case 'links_missing_internal':
+
+				// Get keywords from the post.
+				$keywords = [];
+				if ( $ai_keywords ) {
+					$keywords = get_post_meta( $post->ID, '_seo_engine_ai_keywords', true );
+				} 
+
+				if ( empty( $keywords ) || !is_array( $keywords ) ) {
+					$keywords_prompt = sprintf(" Givent the content of the post : \"%s\", identify the main keywords that are relevant to the post, they will be used to search the website for realted posts using WordPress search. Return a JSON array with the keywords, like this : {\"keywords\": [\"keyword1\", \"keyword2\", \"keyword3\"]}.", $originalContent );
+					$keywords_json = $mwai->simpleJsonQuery( $keywords_prompt );
+					$keywords = $keywords_json['keywords'] ?? [];
+				}
+
+				if ( empty( $keywords ) ) {
+					$core->log( "⚠️ No keywords found for the post." );
+					return false;
+				}
+
+				// Gather the posts that match the keywords.
+				$posts = get_posts( [
+					's' => implode( ' ', $keywords ),
+					'post_type' => 'any',
+					'post_status' => 'publish',
+					'numberposts' => 5,
+				] );
+
+				if ( empty( $posts ) ) {
+					$core->log( "⚠️ No posts found for the keywords." );
+					return false;
+				}
+				
+				$posts_list = [];
+				foreach ( $posts as $related_post ) {
+					// Skip the current post.
+					if ( $related_post->ID === $post->ID ) {
+						continue;
+					}
+
+					$posts_list[] = sprintf( "<a href=\"%s\" target=\"_blank\">%s</a> (Excerpt: \"%s\")", get_permalink( $related_post->ID ), $related_post->post_title, wp_trim_words( $related_post->post_content, 20 ) );
+				}
+
+				if ( empty( $posts_list ) ) {
+					$core->log( "⚠️ No related posts found for the keywords." );
+					return false;
+				}
+
+				// Create the prompt.
+				$prompt = sprintf( "Given the original title: \"%s\" and a sample from the post content : \"%s\", create a new, SEO-friendly paragraph \"Check out our other articles\" that will add a few internal links to related posts on the website. The format should be natural, very human, something along \"We are also talking about [keyword] on %s\". Do NOT include links  that are not provided, only use the one provided here. The Excerpt is just for you to have context about these posts, do NOT include it in the paragraphe. Include the links using the <a> element as provided.", $post->post_title, $originalContent, implode( ', ', $posts_list ) );
+				break;
+	
+			case 'links_missing_external':
 				$prompt = sprintf( "Given the original title: \"%s\" and a sample from the post content : \"%s\", create a new, SEO-friendly paragraph \"You might be interested in\" that will add a few external embedded links to wikipedia articles that are related. The format should be natural, very human, something along \"Speaking of [keyword], you might be interested in  <a href=\"[https_link_to_article]\" target=\"_blank\">[wikipedia_article]</a>\". Feel free to better the format and how the article are presented.", $post->post_title, $originalContent );
 				
 				break;
@@ -70,11 +127,7 @@ class Meow_MWSEO_Modules_Suggestions
 
 		$prompt = sprintf( '%s (Respond in "%s")', $prompt, $language );
 
-		global $mwai;
-		if (is_null( $mwai ) || !isset( $mwai ) ) {
-			$core->log( "⚠️ Missing AI Engine." );
-			return false;
-		}
+		
 
 		$ai_suggestion = $mwai->simpleTextQuery( $prompt, [ 'max_tokens' => $max_tokens] );
 		$ai_suggestion = Meow_MWSEO_Modules_Suggestions::verify_ai_suggestion( $ai_suggestion, $expected_size, $language );
@@ -88,12 +141,11 @@ class Meow_MWSEO_Modules_Suggestions
 				$ai_suggestion = sanitize_title( $ai_suggestion );
 				break;
 			
-			case 'links_missing':
-			case 'magic_fix_links_missing':
-				// Conver to block editor format.
+			case 'links_missing_internal':
+			case 'links_missing_external':
+				// Convert to block editor format.
 				$ai_suggestion = sprintf( "<!-- wp:paragraph -->\n<p>%s</p>\n<!-- /wp:paragraph -->", $ai_suggestion );
 				break;
-			
 			case 'excerpt_seo_length':
 			case 'seo_excerpt':
 			case 'excerpt_missing':
@@ -108,7 +160,7 @@ class Meow_MWSEO_Modules_Suggestions
 
 	public static function verify_ai_suggestion( $ai_suggestion, $expected_size, $language ) {
 		$core = new Meow_MWSEO_Core();
-		$is_auto_correct_enabled = get_option( 'seo_kiss_options', null )[ 'seo_engine_ai_auto_correct' ] ?? false;
+		$is_auto_correct_enabled = get_option( 'mwseo_options', null )[ 'ai_auto_correct' ] ?? false;
 
 		if ( strlen( $ai_suggestion ) > $expected_size && $expected_size > 0 && $is_auto_correct_enabled) {
 			$core->log( "⚠️ AI Suggestion too long." );

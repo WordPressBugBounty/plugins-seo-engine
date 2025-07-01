@@ -4,49 +4,41 @@ Tags: seo, ai, google, search, optimization
 Donate link: https://www.patreon.com/meowapps
 Requires at least: 6.0
 Tested up to: 6.8
-Stable tag: 0.3.9
+Stable tag: 0.4.0
+Requires PHP: 7.4
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
-SEO Engine is built for the AI-driven future. Create quality content, and we handle the SEO. Simple, neat, and hassle-free!
+The modern, lightweight SEO solution for WordPress.
 
 == Description ==
 
-SEO Engine is built for the AI-driven future. Create quality content, and we handle the SEO. Simple, neat, and hassle-free!
+Tired of bloated SEO plugins like Bloast SEO and friends that promise everything while turning your WordPress into a slower experience? Welcome to SEO Engine! We believe SEO should be elegant, not exhausting! ☀️
 
-== Features ==
+We built SEO Engine for people who want powerful SEO without the complexity. No 500+ option screens, no confusing features, just straightforward tools that help you rank better. We focus on what actually matters in modern SEO.
 
-Here is what SEO Engine does for you:
- 
-- Auto-generate meta titles and descriptions
-- Automatically use the {TITLE} | {SITENAME} format for titles
-- Convenient UI to override titles and descriptions, with AI
-- Automatic sitemap.xml and robots.txt generation
-- Social Cards for SNS and Open Graph
-- Search Engine Ranking
-- WooCommerce Assistant (AI)
-- Prevent GPTBot (OpenAI) from using your content
+=== Content Optimization ===
+Write content, click a button, and watch SEO Engine work its magic. Our **AI-powered Magic Fix** instantly optimizes titles and descriptions, while our **SEO scoring system** gives you clear A-F grades. We analyze readability, keywords, and structure, then actually fix the problems instead of just complaining about them.
 
-Need more? Let us know!
+=== Website Health & Speed ===
+Your site's performance affects rankings more than any meta tag ever will. SEO Engine integrates **Google PageSpeed Insights** to monitor your **Core Web Vitals**, accessibility, and loading times.
 
-== The SEO Checklist ==
+=== Tracking & Analytics ===
+Connect **directly to Google Cloud**, no expensive third-party services acting as middlemen with your data. Get your **Google Analytics** metrics, track keyword rankings, and monitor performance straight from the source.
 
-To ensure your website ranks well in search engine results and reaches its full potential, it's crucial to follow these key SEO practices, from the most important to the least.
+=== Technical SEO ===
+Generate **clean sitemaps** that search engines actually want to read. Edit your **robots.txt** without breaking everything. Handle redirects, canonical URLs, and multi-language sites... without installing five different plugins! It just works.
 
-- High-quality content
-- Effective keyword research
-- Mobile-friendly optimization
-- Fast website loading speed
-- Well-structured headings, meta tags, and alt tags
-- User-friendly site navigation
-- Strategic internal linking
-- Foster user engagement (comments, social shares)
-- Consistent updates and site maintenance
+=== AI ===
+When paired with AI Engine, SEO Engine becomes your content optimization assistant. Generate meta descriptions, suggest keywords, and bulk-optimize your entire site. This isn't "AI" slapped on as a marketing term. It's genuinely useful automation that saves hours.
+
+Stop letting your SEO plugin slow down your site. Join the rebellion against bloat! 🏝️
 
 == Installation ==
 
 1. Upload `seo-engine` to the `/wp-content/plugins/` directory
 2. Activate the plugin through the 'Plugins' menu in WordPress
+3. Visit SEO Engine in your admin menu to get started
 
 == Upgrade Notice ==
 
@@ -54,9 +46,31 @@ Replace all the files. Nothing else to do.
 
 == Frequently Asked Questions ==
 
-Nothing yet.
+= Is SEO Engine really faster than other SEO plugins? =
+Yes. We've built SEO Engine from the ground up with performance in mind. No legacy code, no feature bloat. Just clean, modern code that does SEO right.
+
+= Can I import my data from other SEO plugins? =
+Absolutely! SEO Engine can import your SEO data from Yoast and RankMath, making the switch seamless.
+
+= Do I need AI Engine for all features? =
+No, SEO Engine works great on its own. AI Engine unlocks additional AI-powered features like Magic Fix and content generation, but core SEO functionality works without it.
+
+= Is this suitable for large websites? =
+Yes! SEO Engine is designed to scale. Our bulk operations and efficient code make it perfect for sites of any size.
 
 == Changelog ==
+
+= 0.4.0 (2025/06/19) =
+* Add: Model Context Protocol (MCP) integration for AI assistants
+* Add: Comprehensive website health monitoring with PageSpeed Insights
+* Add: Advanced analytics with Core Web Vitals tracking
+* Add: Bulk SEO operations for efficient management
+* Add: SEO statistics dashboard
+* Add: Duplicate title detection
+* Add: Posts missing SEO finder
+* Fix: Readability score calculation method
+* Fix: Insights API integration
+* Update: Modernized UI with better organization
 
 = 0.3.9 (2025/05/11) =
 * Update: Reorganized the dashboard with new modules for easier navigation.

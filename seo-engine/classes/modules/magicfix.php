@@ -232,10 +232,10 @@ class Meow_MWSEO_Modules_MagicFix
   }
 
   // Fix missing links by generating a new paragraph
-  function magic_fix_links_missing()
+  function magic_fix_links_missing( $scope )
   {
     try {
-      $new_paragraph = Meow_MWSEO_Modules_Suggestions::prompt( $this->post, 'magic_fix_links_missing' );
+      $new_paragraph = Meow_MWSEO_Modules_Suggestions::prompt( $this->post, 'links_missing_' . $scope );
       return [ 'solution' => 'A new paragraph was added:', 'value' => $new_paragraph ];
     }
     catch ( Exception $e ) {

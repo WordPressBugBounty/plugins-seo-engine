@@ -23,22 +23,57 @@
 
           body {
             font-family: 'Roboto', Arial, sans-serif;
-            background-color: #f8f9fa;
+            background-color: #f8f9fa; 
             color: #343a40; 
             line-height: 1.6;
             padding: 20px;
+            position: relative; 
+            overflow-x: hidden; 
           }
 
+          body::before {
+            content: '';
+            position: fixed;
+            left: -50vw;     
+            top: -50vh;      
+            width: 200vw;    
+            height: 200vh;
+            z-index: -1;     
+            
+            background-image: var(--random-emoji-bg); 
+            background-size: var(--bg-emoji-size, 60px) var(--bg-emoji-size, 60px); 
+            background-repeat: repeat;
+            
+            opacity: 0.07; 
+            
+            transform: rotate(-45deg); 
+            transform-origin: center center;
+            
+            animation: scrollOnRotated 150s linear infinite; 
+            pointer-events: none; 
+          }
+
+          @keyframes scrollOnRotated {
+            0% {
+              background-position: 0 0;
+            }
+            100% {
+
+              background-position: calc(var(--bg-emoji-size, 60px) * 10) 0;
+            }
+          }
 
           .container {
             max-width: 960px;
             margin: 40px auto;
             padding: 0 15px;
+            position: relative;
+            z-index: 1;
           }
 
 
           h1 {
-            font-size: 2.5em
+            font-size: 2.5em;
             font-weight: 700;
             text-align: center;
             margin-bottom: 20px;
@@ -96,7 +131,7 @@
           table td:first-child,
           table th:first-child {
             text-align: center;
-            width: 8%;
+            width: 8%; /* Width for # column */
           }
           
           table th.loc-col, table td.loc-col { width: 50%; } /* URL / Loc column */
@@ -141,7 +176,6 @@
             font-style: italic;
           }
 
-
           .footer {
             text-align: center;
             padding: 20px;
@@ -158,6 +192,7 @@
             text-decoration: underline;
           }
 
+
           @media screen and (max-width: 768px) {
             body { padding: 10px; }
             .container { margin: 20px auto; }
@@ -171,7 +206,6 @@
               border-radius: 0;
             }
             
-
             table thead {
               display: none; 
             }
@@ -181,18 +215,17 @@
               margin-bottom: 15px;
               border: 1px solid #dee2e6;
               border-radius: 4px;
-              background-color: #fff !important;
+              background-color: #fff !important; /* Ensure content readability on mobile */
             }
             
             table tbody tr:nth-child(even) {
-                background-color: #fff !important;
+                background-color: #fff !important; /* Ensure content readability on mobile */
             }
-
 
             table td {
               display: block;
               text-align: right; 
-              padding-left: 50%;
+              padding-left: 50%; 
               position: relative;
               border-bottom: 1px solid #e9ecef;
             }
@@ -228,8 +261,27 @@
              table td { padding-left: 40%; }
              table td:before { width: calc(40% - 20px); left: 10px; }
           }
-
         </style>
+        <script type="text/javascript">
+          // <![CDATA[
+          document.addEventListener('DOMContentLoaded', function() {
+            const emojis = ['😀', '😂', '😊', '😎', '😍', '🤔', '🥳', '🌟', '🎉', '💡', '✨', '🌍', '🗺️', '🧭', '🕸️', '📄', '📈', '📊', '🔍', '✅', '➡️', '💯', '〰️', '⚙️', '👍', '🌐', '💡'];
+            const randomEmoji = emojis[Math.floor(Math.random() * emojis.length)];
+            
+            const emojiDisplaySize = 120; // in pixels
+
+            const svgInternalSize = 200; // Internal dimension of the SVG
+            const svgFontSize = 60;   // Font size of the emoji within the SVG (relative to svgInternalSize)
+
+            const svgText = `<svg xmlns='http://www.w3.org/2000/svg' width='${svgInternalSize}' height='${svgInternalSize}' viewBox='0 0 ${svgInternalSize} ${svgInternalSize}'><text x='50%' y='50%' font-size='${svgFontSize}' dominant-baseline='middle' text-anchor='middle'>${randomEmoji}</text></svg>`;
+            const svgDataUri = `url("data:image/svg+xml;charset=utf-8,${encodeURIComponent(svgText)}")`;
+
+            // Set CSS custom properties on the root element (<html>)
+            document.documentElement.style.setProperty('--random-emoji-bg', svgDataUri);
+            document.documentElement.style.setProperty('--bg-emoji-size', `${emojiDisplaySize}px`);
+          });
+          // ]]>
+        </script>
       </head>
       <body>
         <div class="container">

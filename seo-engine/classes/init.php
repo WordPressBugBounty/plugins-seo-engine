@@ -2,7 +2,7 @@
 
 if ( class_exists( 'MeowPro_MWSEO_Core' ) && class_exists( 'Meow_MWSEO_Core' ) ) {
 	function seo_engine_thanks_admin_notices() {
-		echo '<div class="error"><p>' . __( 'Thanks for installing the Pro version of SEO Kiss :) However, the free version is still enabled. Please disable or uninstall it.', 'media-cleaner' ) . '</p></div>';
+		echo '<div class="error"><p>' . __( 'Thanks for installing the Pro version of SEO Engine :) However, the free version is still enabled. Please disable or uninstall it.', 'media-cleaner' ) . '</p></div>';
 	}
  
 	add_action( 'admin_notices', 'seo_engine_thanks_admin_notices' );
@@ -46,7 +46,9 @@ spl_autoload_register(function ( $class ) {
 require_once( MWSEO_PATH . '/common/helpers.php');
 
 
-global $SeoEngineCore;
+global $SeoEngineCore, $mwseo_readability, $mwseo_score;
 $SeoEngineCore = new Meow_MWSEO_Core();
+$mwseo_readability = new Meow_MWSEO_Modules_Readability();
+$mwseo_score = new Meow_MWSEO_Score( $SeoEngineCore );
 
 ?>

@@ -11,14 +11,21 @@ class Meow_MWSEO_Sitemap extends WP_Sitemaps_Provider
 
   function init(  )
   {
-    $disabled = $this->core->get_option( 'seo_engine_disable_wp_sitemap', false );
-    $custom = $this->core->get_option( 'seo_engine_sitemap_custom', false );
+    $disabled = $this->core->get_option( 'disable_wp_sitemap', false );
+    $custom = $this->core->get_option( 'sitemap_custom', false );
     if ( $disabled ) {
       add_filter( 'wp_sitemaps_enabled', '__return_false' );
 
       // Make our own sitemap if the WP sitemap is disabled
       if ( $custom ) {
+        // Generate the sitemap on a new post save
         add_action( 'save_post', array( $this, 'create_sitemap_callback' ), 10, 3 );
+
+        // Generate the sitemap on post deletion
+        add_action( 'delete_post', array( $this, 'create_sitemap_callback' ), 10, 3 );
+
+
+
         add_filter( 'robots_txt', array( $this, 'add_sitemap_to_robots' ), 10, 1 );
       }
 
@@ -28,9 +35,9 @@ class Meow_MWSEO_Sitemap extends WP_Sitemaps_Provider
 
     // Excluding Providers
     $excluded_providers = [
-      $this->core->get_option( 'seo_engine_sitemap_exclude_users_provider', false ) ? 'users' : null,
-      $this->core->get_option( 'seo_engine_sitemap_exclude_posts_provider', false ) ? 'posts' : null,
-      $this->core->get_option( 'seo_engine_sitemap_exclude_taxonomies_provider', false ) ? 'taxonomies' : null,
+      $this->core->get_option( 'sitemap_exclude_users_provider', false ) ? 'users' : null,
+      $this->core->get_option( 'sitemap_exclude_posts_provider', false ) ? 'posts' : null,
+      $this->core->get_option( 'sitemap_exclude_taxonomies_provider', false ) ? 'taxonomies' : null,
     ];
 
     add_filter( 
@@ -47,7 +54,7 @@ class Meow_MWSEO_Sitemap extends WP_Sitemaps_Provider
      );
 
     // Exclude Post Types
-    $excluded_post_types = $this->core->get_option('seo_engine_sitemap_excluded_post_types', []);
+    $excluded_post_types = $this->core->get_option('sitemap_excluded_post_types', []);
     add_filter(
         'wp_sitemaps_post_types',
         function ($post_types) use ($excluded_post_types) {
@@ -65,7 +72,7 @@ class Meow_MWSEO_Sitemap extends WP_Sitemaps_Provider
     );
 
     //Exclude Taxonomies
-    $excluded_taxonomies = $this->core->get_option( 'seo_engine_sitemap_excluded_taxonomies', [] );
+    $excluded_taxonomies = $this->core->get_option( 'sitemap_excluded_taxonomies', [] );
     add_filter( 
       'wp_sitemaps_taxonomies',
       function ( $taxonomies ) use ( $excluded_taxonomies ) {
@@ -82,7 +89,7 @@ class Meow_MWSEO_Sitemap extends WP_Sitemaps_Provider
 
 
     //Exclude specific posts
-    $excluded_posts = $this->core->get_option( 'seo_engine_sitemap_excluded_post_ids', [] );
+    $excluded_posts = $this->core->get_option( 'sitemap_excluded_post_ids', [] );
     try {
       $excluded_posts = array_map( 'intval', $excluded_posts );
     } catch ( Exception $e ) {
@@ -110,7 +117,7 @@ class Meow_MWSEO_Sitemap extends WP_Sitemaps_Provider
     $urls = [];
     $posts = get_posts( [
       'post_type' => $post_type,
-      'posts_per_page' => $this->core->get_option( 'seo_engine_sitemap_max_urls', 100 ),
+      'posts_per_page' => $this->core->get_option( 'sitemap_max_urls', 100 ),
       'paged' => $page,
       'fields' => 'ids',
     ] );
@@ -127,7 +134,7 @@ class Meow_MWSEO_Sitemap extends WP_Sitemaps_Provider
     $post_type = $object_subtype;
     $args = [
       'post_type' => $post_type,
-      'posts_per_page' => $this->core->get_option( 'seo_engine_sitemap_post_max_pages', 100 ),
+      'posts_per_page' => $this->core->get_option( 'sitemap_post_max_pages', 100 ),
       'fields' => 'ids',
     ];
 
@@ -140,13 +147,13 @@ class Meow_MWSEO_Sitemap extends WP_Sitemaps_Provider
     // Remove existing Sitemap line
     $output = preg_replace("/Sitemap: .*/", "", $output);
 
-    // Append new Sitemap line
+    // Append new Sitemap line with correct WordPress URL
     $output .= "Sitemap: " . $this->core->get_option( 'sitemap_path' ) . "\n";
     return $output;
   }
 
 
-  public function create_sitemap_callback( $post_id, $post, $update )
+  public function create_sitemap_callback( $post_id, $post )
   {
     if ( wp_is_post_revision( $post_id ) || $post->post_status != 'publish' ) {
       return;
@@ -155,11 +162,16 @@ class Meow_MWSEO_Sitemap extends WP_Sitemaps_Provider
     $this->create_sitemap();
   }
 
+  private $style = null;
   public function create_sitemap() {
     // Using the same settings as the WP core sitemap
-    $excluded_post_types = $this->core->get_option( 'seo_engine_sitemap_excluded_post_types', [] );
-    $excluded_posts      = $this->core->get_option( 'seo_engine_sitemap_excluded_post_ids', [] );
-    $excluded_taxonomies = $this->core->get_option( 'seo_engine_sitemap_excluded_taxonomies', [] );
+    $excluded_post_types = $this->core->get_option( 'sitemap_excluded_post_types', [] );
+    $excluded_posts      = $this->core->get_option( 'sitemap_excluded_post_ids', [] );
+    $excluded_taxonomies = $this->core->get_option( 'sitemap_excluded_taxonomies', [] );
+    
+    $sitemap_style       = $this->core->get_option( 'sitemap_style', 'default' );
+    $sitemap_style       = $sitemap_style == 'default' ? '' : '-' . $sitemap_style;
+    $this->style         = $sitemap_style;
 
     // Convert excluded posts to integers (and log errors if any)
     try {
@@ -189,7 +201,7 @@ class Meow_MWSEO_Sitemap extends WP_Sitemaps_Provider
         // If successfully created, add it to index
         if ( $sub_sitemap_data && ! empty( $sub_sitemap_data['filename'] ) ) {
             $sitemaps[] = [
-                'loc' => home_url( '/' . $sub_sitemap_data['filename'] ),
+                'loc' => site_url( '/' . $sub_sitemap_data['filename'] ),
             ];
         }
     }
@@ -207,25 +219,25 @@ class Meow_MWSEO_Sitemap extends WP_Sitemaps_Provider
         $sub_sitemap_data = $this->create_sitemap_for_taxonomy( $tax_name );
         if ( $sub_sitemap_data && ! empty( $sub_sitemap_data['filename'] ) ) {
             $sitemaps[] = [
-                'loc' => home_url( '/' . $sub_sitemap_data['filename'] ),
+                'loc' => site_url( '/' . $sub_sitemap_data['filename'] ),
             ];
         }
     }
 
     // We do the same for users
-    $exclude_users_provider = $this->core->get_option( 'seo_engine_sitemap_exclude_users_provider', false );
+    $exclude_users_provider = $this->core->get_option( 'sitemap_exclude_users_provider', false );
     if ( ! $exclude_users_provider ) {
         $sub_sitemap_data = $this->create_sitemap_for_users();
         if ( $sub_sitemap_data && ! empty( $sub_sitemap_data['filename'] ) ) {
             $sitemaps[] = [
-                'loc' => home_url( '/' . $sub_sitemap_data['filename'] ),
+                'loc' => site_url( '/' . $sub_sitemap_data['filename'] ),
             ];
         }
     }
 
     // * Now we create the main sitemap index file
     $index_xml  = '<?xml version="1.0" encoding="UTF-8"?>' . "\n";
-    $index_xml .= '<?xml-stylesheet type="text/xsl" href="' . MWSEO_URL . 'classes/sitemap-style.xsl"?>' . "\n";
+    $index_xml .= '<?xml-stylesheet type="text/xsl" href="' . MWSEO_URL . 'classes/sitemap-style' . $this->style  . '.xsl"?>' . "\n";
     $index_xml .= '<sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">' . "\n";
 
     foreach ( $sitemaps as $item ) {
@@ -237,12 +249,12 @@ class Meow_MWSEO_Sitemap extends WP_Sitemaps_Provider
     $index_xml .= '</sitemapindex>' . "\n";
 
     // TODO: Maybe we should have an option to choose the filename
-    $index_filename = 'wp-sitemap.xml';
-    $index_filepath = ABSPATH . $index_filename;
+    $filename = 'wp-sitemap.xml';
+    $filepath = ABSPATH . $filename;;
 
-    file_put_contents( $index_filepath, $index_xml );
+    file_put_contents( $filepath, $index_xml );
+    $realpath = realpath( $filepath );
 
-    $realpath = realpath( $index_filepath );
     $this->core->update_option( 'sitemap_path', $realpath );
 
     return $realpath;
@@ -277,7 +289,7 @@ private function create_sitemap_for_post_type( $post_type, $excluded_posts = [],
       'tax_query'      => $tax_query,
       'orderby'        => 'modified',
       'order'          => 'DESC',
-      'posts_per_page' =>  $this->core->get_option( 'seo_engine_sitemap_max_urls', 100 ),
+      'posts_per_page' =>  $this->core->get_option( 'sitemap_max_urls', 100 ),
   ]);
 
   // If no posts found, maybe skip generating a file
@@ -287,7 +299,7 @@ private function create_sitemap_for_post_type( $post_type, $excluded_posts = [],
 
   // Build sub-sitemap XML
   $xml  = '<?xml version="1.0" encoding="UTF-8"?>' . "\n";
-  $xml .= '<?xml-stylesheet type="text/xsl" href="' . MWSEO_URL . 'classes/sitemap-style.xsl"?>' . "\n";
+  $xml .= '<?xml-stylesheet type="text/xsl" href="' . MWSEO_URL . 'classes/sitemap-style' . $this->style  . '.xsl"?>' . "\n";
   $xml .= '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">' . "\n";
 
   foreach ( $posts as $post ) {
@@ -328,7 +340,7 @@ private function create_sitemap_for_taxonomy( $taxonomy ) {
   }
 
   $xml  = '<?xml version="1.0" encoding="UTF-8"?>' . "\n";
-  $xml .= '<?xml-stylesheet type="text/xsl" href="' . MWSEO_URL . 'classes/sitemap-style.xsl"?>' . "\n";
+  $xml .= '<?xml-stylesheet type="text/xsl" href="' . MWSEO_URL . 'classes/sitemap-style' . $this->style  . '.xsl"?>' . "\n";
   $xml .= '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">' . "\n";
 
   foreach ( $terms as $term ) {
@@ -369,7 +381,7 @@ private function create_sitemap_for_users() {
   }
 
   $xml  = '<?xml version="1.0" encoding="UTF-8"?>' . "\n";
-  $xml .= '<?xml-stylesheet type="text/xsl" href="' . MWSEO_URL . 'classes/sitemap-style.xsl"?>' . "\n";
+  $xml .= '<?xml-stylesheet type="text/xsl" href="' . MWSEO_URL . 'classes/sitemap-style' . $this->style  . '.xsl"?>' . "\n";
   $xml .= '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">' . "\n";
 
   foreach ( $users as $user ) {
