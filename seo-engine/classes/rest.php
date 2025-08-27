@@ -1363,7 +1363,7 @@ class Meow_MWSEO_Rest
 			$instructions .= $content . "\n\n";
 			$instructions .= "Please generate a robots.txt file based on the above information. Don't include any explanations, just provide the raw text of the robots.txt file. No quotes, no code blocks, just the text. The content should be SEO optimized and follow best practices for a WordPress website.\n\n";
 
-			$robots_txt = $mwai->simpleTextQuery( $instructions );
+			$robots_txt = $mwai->simpleTextQuery( $instructions, ['scope' => 'seo-engine'] );
 			if ( empty( $robots_txt ) || is_null( $robots_txt ) ) {
 				return new WP_REST_Response( [ 
 					'success' => false, 

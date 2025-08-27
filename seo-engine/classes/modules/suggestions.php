@@ -11,8 +11,8 @@ class Meow_MWSEO_Modules_Suggestions
 			return false;
 		}
 
-		$language = get_option( 'mwseo_options', null )[ 'default_language' ] ?? 'English';
-		$ai_keywords = get_option( 'mwseo_options', null )[ 'ai_keywords' ] ?? false;
+		$language    = $core->get_option( 'language', 'English' );
+		$ai_keywords = $core->get_option( 'ai_keywords', false );
 
 		$originalContent = $customContent?? Meow_MWSEO_Modules_Suggestions::get_post_sample_context( $post );
 		$prompt = "";
@@ -108,8 +108,7 @@ class Meow_MWSEO_Modules_Suggestions
 				break;
 	
 			case 'links_missing_external':
-				$prompt = sprintf( "Given the original title: \"%s\" and a sample from the post content : \"%s\", create a new, SEO-friendly paragraph \"You might be interested in\" that will add a few external embedded links to wikipedia articles that are related. The format should be natural, very human, something along \"Speaking of [keyword], you might be interested in  <a href=\"[https_link_to_article]\" target=\"_blank\">[wikipedia_article]</a>\". Feel free to better the format and how the article are presented.", $post->post_title, $originalContent );
-				
+				$prompt = sprintf( "Given the original title: \"%s\" and a sample from the post content : \"%s\", create a new, SEO-friendly paragraph \"You might be interested in\" that will add a few external embedded links to wikipedia articles that are related. The format should be natural, very human, something along \"Speaking of [keyword], you might be interested in  <a href=\"[https_link_to_article]\" target=\"_blank\">[wikipedia_article]</a>\". It should be natural, so it should not start with \"You might be interested in\". The wikipedia articles should be related to the post content, and the links should be embedded in the text and it should feel like a natural part of the current paragraph.", $post->post_title, $originalContent );
 				break;
 			
 				//DEFAULT
@@ -125,11 +124,9 @@ class Meow_MWSEO_Modules_Suggestions
 			}
 		}
 
-		$prompt = sprintf( '%s (Respond in "%s")', $prompt, $language );
+		$prompt = sprintf( '<instructions>Reply only with the asked content, no other text or explanations, nothing else. Your reply should be in %s.</instructions> <prompt>%s</prompt>', $language, $prompt );
 
-		
-
-		$ai_suggestion = $mwai->simpleTextQuery( $prompt, [ 'max_tokens' => $max_tokens] );
+		$ai_suggestion = $mwai->simpleTextQuery( $prompt, [ 'scope' => 'seo-engine'] );
 		$ai_suggestion = Meow_MWSEO_Modules_Suggestions::verify_ai_suggestion( $ai_suggestion, $expected_size, $language );
 		
 
@@ -168,15 +165,25 @@ class Meow_MWSEO_Modules_Suggestions
 			$prompt = sprintf('In %s, simplistically paraphrase the following "%s" (currently a %d characters string) into a string with less than %d characters, and ensure that its essential concepts and format are retained. Only the reduced form is required. Shortened string is: ', $language, $ai_suggestion, strlen($ai_suggestion), $expected_size);
 			
 			global $mwai;
-			$ai_suggestion = $mwai->simpleTextQuery( $prompt, [ 'max_tokens' => 150] );
+			$ai_suggestion = $mwai->simpleTextQuery( $prompt, [ 'scope' => 'seo-engine'] );
 		}
 		
 		return $ai_suggestion;
 	}
 
     public static function get_post_sample_context( $post ){
-
-		$content = strip_tags( $post->post_content );
+		$core = new Meow_MWSEO_Core();
+		$check_live_content = $core->get_option( 'check_live_content', false );
+		
+		$content = '';
+		
+		// If check_live_content is enabled, try to fetch the live content
+		if ( $check_live_content ) {
+			$content = $core->get_live_content( $post );
+		} else {
+			$content = strip_tags( $post->post_content );
+		}
+		
 		$words = str_word_count( $content, 1 );
 		$words_count = count( $words );
 
@@ -186,7 +193,7 @@ class Meow_MWSEO_Modules_Suggestions
 		}
 
 		// Get a total of 300 words from the post, 100 from the beginning, 100 from the middle and 100 from the end.
-		$words_per_section = 100;
+		$words_per_section = 200;
 		$words_per_section = $words_per_section > $words_count ? $words_count : $words_per_section;
 		$words_per_section = $words_per_section < 50 ? 50 : $words_per_section;
 

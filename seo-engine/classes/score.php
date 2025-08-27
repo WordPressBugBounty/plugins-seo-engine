@@ -273,7 +273,10 @@ class Meow_MWSEO_Score {
 	 * Check content word count
 	 */
 	private function check_content_word_count( $post, &$errors ) {
-		$content = wp_strip_all_tags( $post->post_content );
+
+		$check_live_content = $this->core->get_option( 'check_live_content', false );
+		$content = $check_live_content ? $this->core->get_live_content( $post ) : wp_strip_all_tags( $post->post_content );
+
 		$word_count = str_word_count( $content );
 		
 		if ( $word_count < $this->min_content_words ) {
@@ -289,9 +292,12 @@ class Meow_MWSEO_Score {
 	 * Check images alt text
 	 */
 	private function check_images_alt_text( $post, &$errors ) {
+		$check_live_content = $this->core->get_option( 'check_live_content', false );
+		$content = $check_live_content ? $this->core->get_live_content( $post, false ) : $post->post_content;
+
 		$images = [];
-		preg_match_all( '/<img[^>]+>/i', $post->post_content, $images );
-		
+		preg_match_all( '/<img[^>]+>/i', $content, $images );
+
 		if ( !empty( $images[0] ) ) {
 			$missing_alt = 0;
 			foreach ( $images[0] as $image ) {
@@ -314,10 +320,11 @@ class Meow_MWSEO_Score {
 	 * Check for internal and external links
 	 */
 	private function check_post_links( $post, &$errors ) {
-		$content = $post->post_content;
-		$raw_html = '';
-		
 
+		$check_live_content = $this->core->get_option( 'check_live_content', false );
+		$content = $check_live_content ? $this->core->get_live_content( $post, false ) :  $post->post_content;
+
+	
 		$has_internal = false;
 		$has_external = false;
 		
@@ -362,7 +369,10 @@ class Meow_MWSEO_Score {
 			return;
 		}
 		
-		$readability_data = $this->readability->calculate_readability( $post->post_content );
+		$check_live_content = $this->core->get_option( 'check_live_content', false );
+		$content = $check_live_content ? $this->core->get_live_content( $post ) : wp_strip_all_tags( $post->post_content );
+
+		$readability_data = $this->readability->calculate_readability( $content );
 		$score = $readability_data['flesch_kincaid'] ?? false;
 		
 		if ( $score !== false && $score < $this->readability_threshold ) {

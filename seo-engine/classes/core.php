@@ -589,7 +589,52 @@ class Meow_MWSEO_Core
 		return $images;
 	}
 
-	function check_images_alt_text( $content ) {
+	function get_live_content( $post, $strip_html = true ) {
+		$post_url = get_permalink( $post->ID );
+		if ( ! $post_url ) {
+			$this->log( "⚠️ Could not get permalink for post ID: " . $post->ID );
+			return $post->post_content;
+		}
+		
+		$response = wp_remote_get( $post_url, array(
+			'timeout' => 10,
+			'user-agent' => 'SEO Engine Live Content Checker'
+		) );
+		
+		if ( is_wp_error( $response ) ) {
+			$this->log( "⚠️ Failed to fetch live content for post ID: " . $post->ID . ". Error: " . $response->get_error_message() );
+			return $post->post_content;
+		}
+		
+		if ( wp_remote_retrieve_response_code( $response ) !== 200 ) {
+			$this->log( "⚠️ Failed to fetch live content for post ID: " . $post->ID . ". HTTP Status: " . wp_remote_retrieve_response_code( $response ) );
+			return $post->post_content;
+		}
+		
+		$body = wp_remote_retrieve_body( $response );
+		if ( empty( $body ) ) {
+			$this->log( "⚠️ Empty response body for post ID: " . $post->ID );
+			return $post->post_content;
+		}
+		
+		// Strip HTML tags and get raw text content
+		if ( $strip_html ) {
+			$body = wp_strip_all_tags( $body );
+		}
+
+		$content = $body;
+		// Clean up extra whitespace
+		$content = preg_replace( '/\s+/', ' ', trim( $content ) );
+		
+		$this->log( "✅ Live content fetched successfully for post ID: " . $post->ID );
+		return $content;
+	}
+
+	function check_images_alt_text( $post ) {
+
+		$check_live_content = $this->get_option( 'check_live_content', false );
+		$content = $check_live_content ? $this->get_live_content( $post, false ) : $post->post_content;
+
 		$images = $this->get_images_from_content( $content );
 		if ( !is_array( $images ) ) {
 			return array();
@@ -692,7 +737,7 @@ class Meow_MWSEO_Core
 				case 'images_missing_alt_text':
 
 					if( !$update_post ) {
-						$images = $this->check_images_alt_text( $post->post_content );
+						$images = $this->check_images_alt_text( $post );
 						$this->log( '🔍 Images missing alt text : ' . count( $images ) );
 					}
 					
