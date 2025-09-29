@@ -4,7 +4,7 @@ Tags: seo, ai, google, search, optimization
 Donate link: https://www.patreon.com/meowapps
 Requires at least: 6.0
 Tested up to: 6.8
-Stable tag: 0.4.1
+Stable tag: 0.4.2
 Requires PHP: 7.4
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
@@ -59,6 +59,12 @@ No, SEO Engine works great on its own. AI Engine unlocks additional AI-powered f
 Yes! SEO Engine is designed to scale. Our bulk operations and efficient code make it perfect for sites of any size.
 
 == Changelog ==
+
+= 0.4.2 (2025/09/29) =
+* Add: Status filter in the Content tab.  
+* Update: Replaced Post Types checkboxes with selectors.  
+* Add: Settings to customize content scan batch sizes.  
+* Fix: Issues with Content SEO status.
 
 = 0.4.1 (2025/08/27) =
 * Update: Reworked AI prompts to exclude header and footer texts for clearer outputs.

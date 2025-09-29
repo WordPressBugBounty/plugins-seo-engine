@@ -102,6 +102,15 @@ class Meow_MWSEO_Rest
 				'callback' => array( $this, 'rest_get_score_factors' )
 			) );
 
+			register_rest_route( $this->namespace, '/get_post_statuses', array(
+				'methods' => 'POST',
+				'args' => array(
+					'type' => array( 'required' => true ),
+				),
+				'permission_callback' => array( $this->core, 'can_access_settings' ),
+				'callback' => array( $this, 'rest_get_post_statuses' )
+			) );
+
 			#endregion
 
 			#region REST SETTINGS
@@ -399,7 +408,11 @@ class Meow_MWSEO_Rest
 		if (empty($language) || $language === 'all') {
 			$language = $this->core->get_option('default_language', 'all');
 		}
-	
+
+		// Get the status filter
+		$status = $this->core->get_option('default_post_status', 'any');
+
+
 		$total_counts = [
 			'pending' => 0,
 			'issue' => 0,
@@ -415,14 +428,15 @@ class Meow_MWSEO_Rest
 			'orderby' => 'meta_value_num', //$sort['accessor'],
 			'order' => $sort['by'] == 'desc' ? 'DESC' : 'ASC',
 			'nopaging' => true,
+			'post_status' => $status,
 			'meta_query' => [
 				'relation' => 'OR',
 				[
-					'key' => '_seo_engine_score',
+					'key' => '_seo_score',
 					'compare' => 'EXISTS', // This will find posts that have the meta key
 				],
 				[
-					'key' => '_seo_engine_score',
+					'key' => '_seo_score',
 					'compare' => 'NOT EXISTS', // This will find posts that do not have the meta key
 				],
 			],
@@ -451,13 +465,16 @@ class Meow_MWSEO_Rest
 		$data = [];
 		foreach ($posts as $post) {
 
-			$status = get_post_meta($post->ID, '_seo_engine_status', true);
+			$post_meta = $this->core->get_seo_engine_post_meta($post);
+
+			$status = $post_meta['status'];
+
 			if ( $status == 'error' ) {
-				$score = get_post_meta($post->ID, '_seo_engine_score', true);
-				$status = $score < 50 ? 'major_issue' : 'issue';
+				$score = $post_meta['score'];
+				$status = $score < 50 ? 'issue' : 'ok';
 			}
 
-			if ( empty($status) ) {
+			if ( empty( $status ) ) {
 				$status = 'pending';
 			}
 
@@ -674,9 +691,9 @@ class Meow_MWSEO_Rest
 		$post_id = $params['id'];
 		$skip = boolVal( $params['skip'] );
 
-		$this->update_or_delete_post_meta( $post_id, '_seo_engine_status', $skip ? 'skip' : 'pending' );
-		$this->update_or_delete_post_meta( $post_id, '_seo_engine_message', $skip ? 'This post has been skipped. No SEO score.' : null );
-		$this->update_or_delete_post_meta( $post_id, '_seo_engine_score', null );
+		$this->update_or_delete_post_meta( $post_id, '_seo_status', $skip ? 'skip' : 'pending' );
+		$this->update_or_delete_post_meta( $post_id, '_seo_message', $skip ? 'This post has been skipped. No SEO score.' : null );
+		$this->update_or_delete_post_meta( $post_id, '_seo_score', null );
 
 		return new WP_REST_Response( [
 			'success' => true,
@@ -1207,6 +1224,40 @@ class Meow_MWSEO_Rest
 				'message' => $e->getMessage(),
 			], 500 );
 		}
+	}
+
+	function rest_get_post_statuses( $request ) {
+		$post_type = $request->get_param('type');
+
+		if( empty($post_type) ) {
+			return new WP_REST_Response([
+				'success' => true,
+				'data' => [],
+			], 200 );
+		}
+
+		$type_to_domain = [
+			'product' => 'woocommerce',
+		];
+
+		$statuses = get_post_stati( [] , 'objects' );
+
+		$status_list = [];
+		foreach ( $statuses as $status ) {
+			$domain = $status->label_count["domain"] ?? 'core';
+
+			if( $domain === 'core' || $domain === $type_to_domain[$post_type] ) {
+				$status_list[] = [
+					'slug' => $status->name,
+					'name' => $status->label,
+				];
+			}
+		}
+
+		return new WP_REST_Response([
+			'success' => true,
+			'data' => $status_list
+		], 200 );
 	}
 	
 	function rest_get_score_factors() {
