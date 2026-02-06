@@ -14,17 +14,64 @@ class Meow_MWSEO_MCP {
   public function init() {
     global $mwseo, $mwai;
     $this->api = $mwseo;
-    
+
     // Only register MCP if enabled AND AI Engine is available
     if ( $this->core->get_option( 'mcp_support', false ) && isset( $mwai ) ) {
       // Register MCP tools
       add_filter( 'mwai_mcp_tools', array( $this, 'register_tools' ) );
-      
+
       // Handle MCP tool execution
       add_filter( 'mwai_mcp_callback', array( $this, 'handle_tool_execution' ), 10, 4 );
     }
   }
-  
+
+  /**
+   * Evaluate the effective SEO quality of a post.
+   * Returns info about both custom and auto-generated SEO, plus any issues detected.
+   * This helps distinguish between "no custom SEO" vs "actually problematic SEO".
+   */
+  private function evaluate_effective_seo( $post ) {
+    $effective_title = $this->core->get_seo_title( $post );
+    $effective_desc = $this->core->get_seo_excerpt( $post );
+
+    $has_custom_title = (bool) get_post_meta( $post->ID, $this->core->meta_key_seo_title, true );
+    $has_custom_desc = (bool) get_post_meta( $post->ID, $this->core->meta_key_seo_excerpt, true );
+
+    // Use display width instead of character count (CJK chars count as 2)
+    $title_width = $this->core->get_display_width( $effective_title );
+    $desc_width = $this->core->get_display_width( $effective_desc );
+
+    // Evaluate title quality (optimal: 30-60 display units)
+    $title_issues = [];
+    if ( $title_width < 30 ) {
+      $title_issues[] = 'too_short';
+    }
+    if ( $title_width > 60 ) {
+      $title_issues[] = 'too_long';
+    }
+
+    // Evaluate description quality (optimal: 80-160 display units)
+    $desc_issues = [];
+    if ( empty( $effective_desc ) || $desc_width < 80 ) {
+      $desc_issues[] = 'too_short';
+    }
+    if ( $desc_width > 160 ) {
+      $desc_issues[] = 'too_long';
+    }
+
+    return [
+      'has_custom_title' => $has_custom_title,
+      'has_custom_description' => $has_custom_desc,
+      'effective_title' => $effective_title,
+      'effective_description' => $effective_desc,
+      'title_display_width' => $title_width,
+      'description_display_width' => $desc_width,
+      'title_issues' => $title_issues,
+      'description_issues' => $desc_issues,
+      'needs_attention' => !empty( $title_issues ) || !empty( $desc_issues )
+    ];
+  }
+
   public function register_tools( $tools ) {
     // IMPORTANT: When defining inputSchema with no properties, do NOT include an empty 
     // 'properties' => [] array. This can cause MCP parsers to fail silently. 
@@ -33,23 +80,23 @@ class Meow_MWSEO_MCP {
     // SEO Title Operations
     $tools[] = [
       'name' => 'mwseo_get_seo_title',
-      'description' => 'Get the SEO title (meta title) for a specific post or page. This is the title that appears in search engine results and browser tabs.',
+      'description' => 'Get the SEO meta title for a post. This is the title that appears in search engine results (SERPs) and browser tabs, not the WordPress post title. Returns the custom SEO title if set, otherwise returns the default generated title. Use this to see what title search engines will display.',
       'category' => 'SEO Engine',
       'inputSchema' => [
         'type' => 'object',
         'properties' => [
           'post_id' => [
             'type' => 'integer',
-            'description' => 'The WordPress post ID. You can get this from other tools or by searching for posts.'
+            'description' => 'The WordPress post ID. You can get this from mwseo_search_posts, mwseo_get_post_by_slug, or other discovery tools.'
           ]
         ],
         'required' => ['post_id']
       ]
     ];
-    
+
     $tools[] = [
       'name' => 'mwseo_set_seo_title',
-      'description' => 'Set or update the SEO title (meta title) for a post or page. This title appears in search results and should be 50-60 characters for optimal display.',
+      'description' => 'Set a custom SEO meta title for a post. This overrides the WordPress post title for search engines. Optimal length is 50-60 characters to avoid truncation in search results. The title should be compelling and include target keywords near the beginning.',
       'category' => 'SEO Engine',
       'inputSchema' => [
         'type' => 'object',
@@ -60,7 +107,7 @@ class Meow_MWSEO_MCP {
           ],
           'title' => [
             'type' => 'string',
-            'description' => 'The SEO title to set. Recommended length: 50-60 characters. This will appear in search engine results.'
+            'description' => 'The SEO title to set. Should be 50-60 characters for optimal display in search results. Include important keywords at the start.'
           ]
         ],
         'required' => ['post_id', 'title']
@@ -70,34 +117,34 @@ class Meow_MWSEO_MCP {
     // SEO Excerpt Operations
     $tools[] = [
       'name' => 'mwseo_get_seo_excerpt',
-      'description' => 'Get the SEO meta description for a post',
+      'description' => 'Get the SEO meta description for a post. This is the description snippet that appears under the title in search engine results. Returns the custom meta description if set, otherwise returns the default excerpt. This is crucial for click-through rates from search results.',
       'category' => 'SEO Engine',
       'inputSchema' => [
         'type' => 'object',
         'properties' => [
           'post_id' => [
             'type' => 'integer',
-            'description' => 'The post ID'
+            'description' => 'The WordPress post ID'
           ]
         ],
         'required' => ['post_id']
       ]
     ];
-    
+
     $tools[] = [
       'name' => 'mwseo_set_seo_excerpt',
-      'description' => 'Set the SEO meta description for a post',
+      'description' => 'Set the SEO meta description for a post. This text appears in search results under the title and should be 80-160 characters. Write it like an elevator pitch - compelling, clear, and including target keywords naturally. This directly impacts click-through rate from search results.',
       'category' => 'SEO Engine',
       'inputSchema' => [
         'type' => 'object',
         'properties' => [
           'post_id' => [
             'type' => 'integer',
-            'description' => 'The post ID'
+            'description' => 'The WordPress post ID to update'
           ],
           'excerpt' => [
             'type' => 'string',
-            'description' => 'The meta description text'
+            'description' => 'The meta description text. Should be 80-160 characters, compelling, and include target keywords naturally.'
           ]
         ],
         'required' => ['post_id', 'excerpt']
@@ -107,7 +154,7 @@ class Meow_MWSEO_MCP {
     // SEO Score Operations
     $tools[] = [
       'name' => 'mwseo_get_seo_score',
-      'description' => 'Get the current SEO score and metadata for a post. Returns score from 0 to 100, grade from A to F, and detailed SEO analysis including title, description, keywords, and readability metrics.',
+      'description' => 'Get the complete SEO analysis for a post including score (0-100), status, detailed test results, and all issues found. Returns the full analysis object with scores for individual tests like title_exists, excerpt_length, readability_score, etc. Each test returns a score or "NA" if not applicable. Use this to understand exactly what SEO issues a post has.',
       'category' => 'SEO Engine',
       'inputSchema' => [
         'type' => 'object',
@@ -123,14 +170,14 @@ class Meow_MWSEO_MCP {
     
     $tools[] = [
       'name' => 'mwseo_do_seo_scan',
-      'description' => 'Perform a comprehensive SEO analysis on a post. This calculates the SEO score, analyzes content quality, checks meta tags, evaluates readability, and provides actionable recommendations.',
+      'description' => 'Run a fresh comprehensive SEO analysis on a post. This re-calculates the SEO score by analyzing content quality, meta tags, readability, image alt text, internal/external links, and more. Use this after making changes to a post to see updated scores. Returns the complete analysis with individual test scores and overall rating.',
       'category' => 'SEO Engine',
       'inputSchema' => [
         'type' => 'object',
         'properties' => [
           'post_id' => [
             'type' => 'integer',
-            'description' => 'The WordPress post ID to scan and analyze'
+            'description' => 'The WordPress post ID to scan. This will perform a fresh analysis and update stored scores.'
           ]
         ],
         'required' => ['post_id']
@@ -139,24 +186,39 @@ class Meow_MWSEO_MCP {
     
     $tools[] = [
       'name' => 'mwseo_get_scored_posts',
-      'description' => 'Get a list of all posts that have been analyzed with their SEO scores. Useful for identifying posts that need SEO improvements.',
+      'description' => 'Get a list of all posts that have been analyzed with their SEO scores. Useful for identifying posts that need SEO improvements. Supports filtering by post type and status to narrow down results.',
       'category' => 'SEO Engine',
       'inputSchema' => [
-        'type' => 'object'
+        'type' => 'object',
+        'properties' => [
+          'post_type' => [
+            'type' => 'string',
+            'description' => 'Filter by post type (e.g., "post", "page", "product"). Leave empty for all types.'
+          ],
+          'status' => [
+            'type' => 'string',
+            'description' => 'Filter by status: "ok" (good SEO), "error" (needs improvement), "skip" (skipped posts), or leave empty for all.'
+          ],
+          'limit' => [
+            'type' => 'integer',
+            'description' => 'Maximum number of results to return',
+            'default' => 100
+          ]
+        ]
       ]
     ];
 
     // Insights
     $tools[] = [
       'name' => 'mwseo_get_insights',
-      'description' => 'Analyze website speed, performance, and health using Google PageSpeed Insights. Get comprehensive metrics including performance score, accessibility rating, best practices compliance, SEO technical audit, Core Web Vitals (LCP, FID, CLS), loading times, and actionable recommendations for improvements. This is a complete website health check tool.',
+      'description' => 'Get Google PageSpeed Insights data for a specific post URL. Returns performance metrics, Core Web Vitals (LCP, FID, CLS), accessibility score, best practices compliance, and SEO technical audit. This analyzes actual page load performance from Google\'s perspective. Note: This makes a live API call to Google and may take a few seconds.',
       'category' => 'SEO Engine',
       'inputSchema' => [
         'type' => 'object',
         'properties' => [
           'post_id' => [
             'type' => 'integer',
-            'description' => 'The WordPress post ID to get insights for'
+            'description' => 'The WordPress post ID to analyze. The post must be published and accessible publicly.'
           ]
         ],
         'required' => ['post_id']
@@ -166,106 +228,91 @@ class Meow_MWSEO_MCP {
     // Robots.txt Operations
     $tools[] = [
       'name' => 'mwseo_get_robots_txt',
-      'description' => 'Get the current robots.txt content. This file controls how search engine crawlers access your website.',
+      'description' => 'Get the current robots.txt file content from the website root. This file tells search engine crawlers which pages they can and cannot access. Returns the actual file content if it exists, otherwise returns the WordPress default robots.txt rules.',
       'category' => 'SEO Engine',
       'inputSchema' => [
         'type' => 'object'
       ]
     ];
-    
+
     $tools[] = [
       'name' => 'mwseo_set_robots_txt',
-      'description' => 'Update the robots.txt content to control search engine crawler access. Be careful as incorrect rules can block search engines from indexing your site.',
+      'description' => 'Update the robots.txt file in the website root. Use this to control which search engine crawlers can access which parts of your site. IMPORTANT: Be very careful - incorrect rules can accidentally block search engines from indexing your entire site. Always include "User-agent: *" and "Sitemap:" directives.',
       'category' => 'SEO Engine',
       'inputSchema' => [
         'type' => 'object',
         'properties' => [
           'content' => [
             'type' => 'string',
-            'description' => 'The complete robots.txt content. Should follow robots.txt syntax with User-agent and Disallow/Allow directives.'
+            'description' => 'The complete robots.txt content. Must follow robots.txt syntax with User-agent and Disallow/Allow directives. Include sitemap URL.'
           ]
         ],
         'required' => ['content']
       ]
     ];
     
-    // Google Analytics Operations
+    // Analytics Operations (Source-Agnostic)
     $tools[] = [
-      'name' => 'mwseo_get_analytics_monthly_summary',
-      'description' => 'Get Google Analytics summary for the current month including visitors, pageviews, sessions, bounce rate, and average session duration.',
-      'category' => 'SEO Engine',
-      'inputSchema' => [
-        'type' => 'object'
-      ]
-    ];
-    
-    $tools[] = [
-      'name' => 'mwseo_get_analytics_range_summary',
-      'description' => 'Get Google Analytics summary for a custom date range. Returns traffic metrics, user behavior, and engagement statistics.',
+      'name' => 'mwseo_get_analytics_data',
+      'description' => 'Get analytics data from the currently configured source (Google Analytics, Plausible Analytics, or Private Analytics). Specify metric="summary" for traffic overview (visitors, pageviews, sessions, bounce rate) or metric="top_posts" for most visited content. Supports date range filtering and country filtering. Defaults to current month if dates omitted. Examples: (1) Get current month summary: metric="summary". (2) Get January top posts: metric="top_posts", start_date="2024-01-01", end_date="2024-01-31". (3) Get US traffic only: metric="top_posts", country="US". Respects the Display Source setting in the dashboard.',
       'category' => 'SEO Engine',
       'inputSchema' => [
         'type' => 'object',
         'properties' => [
+          'metric' => [
+            'type' => 'string',
+            'description' => 'Type of data to fetch: "summary" (traffic overview) or "top_posts" (most visited content)',
+            'enum' => ['summary', 'top_posts']
+          ],
           'start_date' => [
             'type' => 'string',
-            'description' => 'Start date in YYYY-MM-DD format'
+            'description' => 'Optional: Start date in YYYY-MM-DD format. Omit for current month.'
           ],
           'end_date' => [
             'type' => 'string',
-            'description' => 'End date in YYYY-MM-DD format'
-          ]
-        ],
-        'required' => ['start_date', 'end_date']
-      ]
-    ];
-    
-    $tools[] = [
-      'name' => 'mwseo_get_analytics_monthly_top_posts',
-      'description' => 'Get the most visited posts/pages for the current month from Google Analytics. Shows pageviews, unique visitors, and engagement metrics.',
-      'category' => 'SEO Engine',
-      'inputSchema' => [
-        'type' => 'object'
-      ]
-    ];
-    
-    $tools[] = [
-      'name' => 'mwseo_get_analytics_range_top_posts',
-      'description' => 'Get top posts from Google Analytics for a date range',
-      'category' => 'SEO Engine',
-      'inputSchema' => [
-        'type' => 'object',
-        'properties' => [
-          'start_date' => [
-            'type' => 'string',
-            'description' => 'Start date (YYYY-MM-DD)'
+            'description' => 'Optional: End date in YYYY-MM-DD format. Omit for current month.'
           ],
-          'end_date' => [
-            'type' => 'string',
-            'description' => 'End date (YYYY-MM-DD)'
-          ]
-        ],
-        'required' => ['start_date', 'end_date']
-      ]
-    ];
-    
-    $tools[] = [
-      'name' => 'mwseo_get_analytics_top_posts_by_country',
-      'description' => 'Get top performing posts filtered by visitor country. Useful for understanding regional content performance and targeting.',
-      'category' => 'SEO Engine',
-      'inputSchema' => [
-        'type' => 'object',
-        'properties' => [
           'country' => [
             'type' => 'string',
-            'description' => 'ISO country code like US, GB or FR. Use all to see all countries'
+            'description' => 'Optional: Filter by ISO country code ("US", "GB", "FR", etc.) or "all" for all countries. Only applies to top_posts metric and only works if the analytics source provides country data (Google Analytics, Plausible Analytics).'
+          ],
+          'limit' => [
+            'type' => 'integer',
+            'description' => 'Optional: Maximum posts to return when metric="top_posts". Default 20.',
+            'default' => 20
           ]
-        ]
+        ],
+        'required' => ['metric']
       ]
     ];
-    
+
+    $tools[] = [
+      'name' => 'mwseo_get_post_analytics',
+      'description' => 'Get analytics data for a specific post or page. Returns visits, unique visitors, pageviews, and other metrics for the given post. Useful for answering questions like "how many visits does this page get?" or "what is the traffic for this article?". Supports date range filtering. Defaults to current month if dates omitted. Respects the Display Source setting in the dashboard.',
+      'category' => 'SEO Engine',
+      'inputSchema' => [
+        'type' => 'object',
+        'properties' => [
+          'post_id' => [
+            'type' => 'integer',
+            'description' => 'The WordPress post ID to get analytics for.'
+          ],
+          'start_date' => [
+            'type' => 'string',
+            'description' => 'Optional: Start date in YYYY-MM-DD format. Omit for current month.'
+          ],
+          'end_date' => [
+            'type' => 'string',
+            'description' => 'Optional: End date in YYYY-MM-DD format. Omit for current month.'
+          ]
+        ],
+        'required' => ['post_id']
+      ]
+    ];
+
     $tools[] = [
       'name' => 'mwseo_get_analytics_top_countries',
-      'description' => 'Get a list of countries where your visitors come from, sorted by traffic volume. Helps identify your main audience locations.',
+      'description' => 'Get a ranked list of countries where your website visitors come from, sorted by traffic volume. Returns country codes and visitor counts aggregated from top posts data. Helps identify your main audience locations for targeted content strategy and localization decisions. Note: Country data requires Google Analytics or Plausible Analytics; will return an error if using Private Analytics.',
       'category' => 'SEO Engine',
       'inputSchema' => [
         'type' => 'object'
@@ -275,35 +322,35 @@ class Meow_MWSEO_MCP {
     // Utility Tools
     $tools[] = [
       'name' => 'mwseo_get_post_by_slug',
-      'description' => 'Find a post or page by its URL slug. Returns the post ID and basic information needed for other SEO operations.',
+      'description' => 'Look up a post by its URL slug to get the WordPress post ID. The slug is the URL-friendly part of the post URL (e.g., "my-awesome-post" from example.com/my-awesome-post). Returns post ID, title, and type. Use this when you know the URL but need the post ID for other operations.',
       'category' => 'SEO Engine',
       'inputSchema' => [
         'type' => 'object',
         'properties' => [
           'slug' => [
             'type' => 'string',
-            'description' => 'The URL slug of the post or page'
+            'description' => 'The URL slug of the post (the part after the domain in the URL, without slashes)'
           ],
           'post_type' => [
             'type' => 'string',
-            'description' => 'The WordPress post type to search in. Common values: "post" (blog posts), "page" (static pages)',
+            'description' => 'The WordPress post type to search in. Use "post" for blog posts, "page" for pages, "product" for WooCommerce products.',
             'default' => 'post'
           ]
         ],
         'required' => ['slug']
       ]
     ];
-    
+
     $tools[] = [
       'name' => 'mwseo_bulk_seo_scan',
-      'description' => 'Perform SEO analysis on multiple posts at once. Efficient for auditing content sections or entire websites.',
+      'description' => 'Run SEO analysis on multiple posts at once. More efficient than calling mwseo_do_seo_scan individually for each post. Useful for auditing entire categories, updating scores after SEO changes, or analyzing all posts of a specific type. Returns results for all posts with their individual scores.',
       'category' => 'SEO Engine',
       'inputSchema' => [
         'type' => 'object',
         'properties' => [
           'post_ids' => [
             'type' => 'array',
-            'description' => 'Array of WordPress post IDs to analyze',
+            'description' => 'Array of WordPress post IDs to analyze. Example: [123, 456, 789]',
             'items' => [
               'type' => 'integer'
             ]
@@ -316,20 +363,20 @@ class Meow_MWSEO_MCP {
     // Advanced SEO Tools
     $tools[] = [
       'name' => 'mwseo_get_posts_by_score_range',
-      'description' => 'Find posts within a specific SEO score range. Useful for identifying posts that need improvement or are performing well.',
+      'description' => 'Find all posts with SEO scores within a specific range. Useful for targeted optimization - find posts scoring 40-69 that need improvement, or 70+ that are doing well. Scores: 0-39=Poor, 40-69=Needs Work, 70+=Good. Returns post IDs, titles, and current scores.',
       'category' => 'SEO Engine',
       'inputSchema' => [
         'type' => 'object',
         'properties' => [
           'min_score' => [
             'type' => 'integer',
-            'description' => 'Minimum SEO score (0-100)',
+            'description' => 'Minimum SEO score (0-100). For example, use 0 to find worst posts, or 40 to find mediocre posts.',
             'minimum' => 0,
             'maximum' => 100
           ],
           'max_score' => [
             'type' => 'integer',
-            'description' => 'Maximum SEO score (0-100)',
+            'description' => 'Maximum SEO score (0-100). For example, use 39 for poor posts, or 100 for all posts above minimum.',
             'minimum' => 0,
             'maximum' => 100
           ]
@@ -337,17 +384,17 @@ class Meow_MWSEO_MCP {
         'required' => ['min_score', 'max_score']
       ]
     ];
-    
+
     $tools[] = [
       'name' => 'mwseo_get_posts_missing_seo',
-      'description' => 'Find posts that are missing SEO titles or descriptions. Essential for identifying content gaps in your SEO strategy.',
+      'description' => 'Find posts without CUSTOM SEO titles or descriptions. Note: Posts without custom SEO use auto-generated values from the WordPress title/excerpt, which are often perfectly adequate. For posts where the effective SEO actually has problems (too short, too long), use mwseo_get_posts_needing_seo instead.',
       'category' => 'SEO Engine',
       'inputSchema' => [
         'type' => 'object',
         'properties' => [
           'post_type' => [
             'type' => 'string',
-            'description' => 'Filter by post type such as post or page. Leave empty for all types.',
+            'description' => 'Filter by post type: "post", "page", "product", etc. Leave empty to search all post types.',
             'default' => ''
           ],
           'limit' => [
@@ -358,93 +405,359 @@ class Meow_MWSEO_MCP {
         ]
       ]
     ];
-    
+
+    $tools[] = [
+      'name' => 'mwseo_get_posts_needing_seo',
+      'description' => 'Find posts where the EFFECTIVE SEO (custom or auto-generated) has actual problems. Uses display width (CJK characters count as 2) to approximate Google SERP pixel limits. Flags titles outside 30-60 width and descriptions outside 80-160 width. More actionable than mwseo_get_posts_missing_seo because it finds posts that genuinely need attention, not just posts without custom SEO.',
+      'category' => 'SEO Engine',
+      'inputSchema' => [
+        'type' => 'object',
+        'properties' => [
+          'post_type' => [
+            'type' => 'string',
+            'description' => 'Filter by post type: "post", "page", "product", etc. Leave empty to search all post types.',
+            'default' => ''
+          ],
+          'issue_type' => [
+            'type' => 'string',
+            'description' => 'Filter by issue type: "title" for title issues only, "description" for description issues only, "any" for either (default).',
+            'default' => 'any'
+          ],
+          'limit' => [
+            'type' => 'integer',
+            'description' => 'Maximum number of results to return',
+            'default' => 50
+          ]
+        ]
+      ]
+    ];
+
     $tools[] = [
       'name' => 'mwseo_search_posts',
-      'description' => 'Search for posts by title or content to find specific content for SEO optimization.',
+      'description' => 'Search posts by title or content keywords. Use this to find specific posts when you don\'t know the post ID. Returns matching posts with their IDs, titles, permalinks, and SEO scores if available. Useful for finding posts about specific topics for optimization.',
       'category' => 'SEO Engine',
       'inputSchema' => [
         'type' => 'object',
         'properties' => [
           'search_term' => [
             'type' => 'string',
-            'description' => 'The term to search for in post titles and content'
+            'description' => 'The keyword or phrase to search for in post titles and content'
           ],
           'post_type' => [
             'type' => 'string',
-            'description' => 'Filter by post type such as post or page',
+            'description' => 'Filter by post type like "post", "page", etc. Leave empty to search all types.',
             'default' => ''
           ],
           'limit' => [
             'type' => 'integer',
-            'description' => 'Maximum number of results',
+            'description' => 'Maximum number of results to return',
             'default' => 20
           ]
         ],
         'required' => ['search_term']
       ]
     ];
-    
+
     $tools[] = [
       'name' => 'mwseo_get_recent_posts',
-      'description' => 'Get recently published posts for SEO review. Helps ensure new content is properly optimized from the start.',
+      'description' => 'Get recently published posts from the last N days. Perfect for auditing new content to ensure it starts with good SEO. Returns posts with their SEO scores and whether they have SEO titles/descriptions set. Use this to catch SEO issues early on new content.',
       'category' => 'SEO Engine',
       'inputSchema' => [
         'type' => 'object',
         'properties' => [
           'days' => [
             'type' => 'integer',
-            'description' => 'Number of days to look back',
+            'description' => 'Number of days to look back. Default is 7 (last week).',
             'default' => 7
           ],
           'post_type' => [
             'type' => 'string',
-            'description' => 'Filter by post type',
+            'description' => 'Filter by post type like "post" or "page"',
             'default' => 'post'
           ]
         ]
       ]
     ];
-    
+
     $tools[] = [
       'name' => 'mwseo_generate_sitemap_preview',
-      'description' => 'Generate a preview of what would be included in the XML sitemap. Useful for understanding site structure and SEO coverage.',
+      'description' => 'Preview what URLs would be included in the XML sitemap without generating the actual file. Shows post URLs, last modified dates, and post types. Useful for understanding what content search engines will discover through the sitemap.',
       'category' => 'SEO Engine',
       'inputSchema' => [
         'type' => 'object',
         'properties' => [
           'post_type' => [
             'type' => 'string',
-            'description' => 'Filter by specific post type, or leave empty for all',
+            'description' => 'Filter by specific post type like "post" or "page", or leave empty to preview all types',
             'default' => ''
           ],
           'limit' => [
             'type' => 'integer',
-            'description' => 'Maximum number of URLs to preview',
+            'description' => 'Maximum number of URLs to include in preview',
             'default' => 100
           ]
         ]
       ]
     ];
-    
+
     $tools[] = [
       'name' => 'mwseo_check_duplicate_titles',
-      'description' => 'Find posts with duplicate or similar SEO titles. Duplicate titles can confuse search engines and hurt rankings.',
+      'description' => 'Find posts with identical SEO titles. Duplicate titles confuse search engines about which page to rank for a query, hurting SEO for both pages. Returns groups of posts sharing the same title. Fix these by making each title unique and descriptive.',
       'category' => 'SEO Engine',
       'inputSchema' => [
         'type' => 'object'
       ]
     ];
-    
+
     $tools[] = [
       'name' => 'mwseo_get_seo_statistics',
-      'description' => 'Get overall SEO statistics for the website including average scores, completion rates, and improvement opportunities.',
+      'description' => 'Get comprehensive SEO statistics for the entire website. Returns total posts, average SEO score, score distribution (A/B/C/D/F grades), custom SEO rates, AND counts of posts with actual SEO issues (title/description too short or too long). The "posts_needing_attention" count shows posts that genuinely need work, while "custom_title_rate" just shows customization rate (low rate is fine if auto-generated titles are good).',
       'category' => 'SEO Engine',
       'inputSchema' => [
         'type' => 'object'
       ]
     ];
-    
+
+    // AI Keywords
+    $tools[] = [
+      'name' => 'mwseo_get_ai_keywords',
+      'description' => 'Get the AI-extracted keywords for a post. These keywords help SEO Engine optimize the content analysis and scoring. They are NOT WordPress tags or categories, but semantic keywords that guide the SEO optimization process.',
+      'category' => 'SEO Engine',
+      'inputSchema' => [
+        'type' => 'object',
+        'properties' => [
+          'post_id' => [
+            'type' => 'integer',
+            'description' => 'The WordPress post ID'
+          ]
+        ],
+        'required' => ['post_id']
+      ]
+    ];
+
+    $tools[] = [
+      'name' => 'mwseo_set_ai_keywords',
+      'description' => 'Set AI keywords for a post to guide SEO Engine optimization. These keywords help the plugin understand what topics and concepts are important in the content, enabling better SEO analysis and recommendations. They are internal to SEO Engine and not WordPress tags.',
+      'category' => 'SEO Engine',
+      'inputSchema' => [
+        'type' => 'object',
+        'properties' => [
+          'post_id' => [
+            'type' => 'integer',
+            'description' => 'The WordPress post ID'
+          ],
+          'keywords' => [
+            'type' => 'array',
+            'description' => 'Array of keyword strings (e.g., ["machine learning", "artificial intelligence", "neural networks"]). Usually 3-5 keywords work best.',
+            'items' => [
+              'type' => 'string'
+            ]
+          ]
+        ],
+        'required' => ['post_id', 'keywords']
+      ]
+    ];
+
+    // Bot Analytics - Advanced Tools
+    $tools[] = [
+      'name' => 'mwseo_query_bot_traffic',
+      'description' => 'Flexible query tool for AI bot traffic with timeline analysis and rollups. Returns both aggregate statistics and time-series data to answer questions like "Show me ClaudeBot activity on my pricing page this month, grouped by day" or "What\'s the overall bot traffic trend?". This single tool covers most bot traffic analysis needs including trends, top pages, and specific post tracking.',
+      'category' => 'SEO Engine',
+      'inputSchema' => [
+        'type' => 'object',
+        'properties' => [
+          'start_date' => [
+            'type' => 'string',
+            'description' => 'Start date in YYYY-MM-DD format. Defaults to 30 days ago if omitted. Example: "2025-10-01"'
+          ],
+          'end_date' => [
+            'type' => 'string',
+            'description' => 'End date in YYYY-MM-DD format. Defaults to today if omitted. Example: "2025-10-23"'
+          ],
+          'post_id' => [
+            'type' => 'integer',
+            'description' => 'Optional: Filter by specific post ID to see bot traffic for a single post. Omit to see site-wide traffic.'
+          ],
+          'bot_name' => [
+            'type' => 'string',
+            'description' => 'Optional: Filter by specific bot name (e.g., "GPTBot", "ClaudeBot", "Google-Extended", "PerplexityBot"). Omit to see all bots. Case-sensitive exact match.'
+          ],
+          'group_by' => [
+            'type' => 'string',
+            'description' => 'Optional: Time grouping for trend analysis. Options: "hour" (hourly breakdown), "day" (daily breakdown - most common), "week" (weekly aggregates), "month" (monthly aggregates). Omit for aggregates only without timeline.',
+            'enum' => ['hour', 'day', 'week', 'month']
+          ],
+          'metric' => [
+            'type' => 'string',
+            'description' => 'Metric to track in time-series. Options: "visits" (count of bot visits - default), "unique_posts" (number of different posts visited per period). Only relevant when group_by is specified.',
+            'default' => 'visits',
+            'enum' => ['visits', 'unique_posts']
+          ]
+        ]
+      ]
+    ];
+
+    $tools[] = [
+      'name' => 'mwseo_rank_posts_for_bots',
+      'description' => 'Rank posts by bot visit frequency to find most or least visited content. Perfect for discovering which content attracts AI crawlers (most visited) or which published posts are being ignored (least visited). Supports filtering by bot type, post type, and minimum visit thresholds.',
+      'category' => 'SEO Engine',
+      'inputSchema' => [
+        'type' => 'object',
+        'properties' => [
+          'order' => [
+            'type' => 'string',
+            'description' => 'Ranking order: "most" returns highest-traffic posts first (popular content), "least" returns lowest-traffic posts first (neglected content). Default is "most".',
+            'default' => 'most',
+            'enum' => ['most', 'least']
+          ],
+          'limit' => [
+            'type' => 'integer',
+            'description' => 'Maximum number of posts to return. Default is 20, useful for quick overviews. Set higher (e.g., 50-100) for comprehensive audits.',
+            'default' => 20
+          ],
+          'min_visits' => [
+            'type' => 'integer',
+            'description' => 'Minimum visit threshold. Only return posts with at least this many bot visits. Default 0 shows all posts. Use 1+ when order="least" to exclude completely unvisited posts.',
+            'default' => 0
+          ],
+          'bot_name' => [
+            'type' => 'string',
+            'description' => 'Optional: Filter by specific bot (e.g., "ClaudeBot") to see which posts that bot prefers. Omit to consider all bots.'
+          ],
+          'post_type' => [
+            'type' => 'string',
+            'description' => 'Optional: Filter by WordPress post type (e.g., "post", "page", "product"). Useful for analyzing specific content types. Omit to include all post types.'
+          ],
+          'days' => [
+            'type' => 'integer',
+            'description' => 'Number of days to look back from today. Default 30 (last month). Use 7 for weekly trends, 90 for quarterly analysis, etc.',
+            'default' => 30
+          ]
+        ]
+      ]
+    ];
+
+    $tools[] = [
+      'name' => 'mwseo_bot_profile',
+      'description' => 'Comprehensive deep-dive analysis for a specific AI bot. Returns headline statistics, top visited posts, daily visit cadence, and anomaly detection (spikes vs prior period). Use this to understand a bot\'s behavior patterns, crawl frequency, content preferences, and detect unusual activity.',
+      'category' => 'SEO Engine',
+      'inputSchema' => [
+        'type' => 'object',
+        'properties' => [
+          'bot_name' => [
+            'type' => 'string',
+            'description' => 'Name of the bot to analyze (e.g., "GPTBot", "ClaudeBot", "Google-Extended"). Must match exactly. This is the primary identifier for the bot whose profile you want to see.'
+          ],
+          'start_date' => [
+            'type' => 'string',
+            'description' => 'Analysis period start date in YYYY-MM-DD format. Defaults to 30 days ago. The tool automatically compares against an equal prior period for anomaly detection.'
+          ],
+          'end_date' => [
+            'type' => 'string',
+            'description' => 'Analysis period end date in YYYY-MM-DD format. Defaults to today. Combined with start_date to define the analysis window.'
+          ]
+        ],
+        'required' => ['bot_name']
+      ]
+    ];
+
+    $tools[] = [
+      'name' => 'mwseo_compare_bot_periods',
+      'description' => 'Compare bot traffic between two time periods to identify trends, growth, or decline. Returns percent changes, trend indicators (increasing/decreasing/stable), and highlights posts with the biggest traffic shifts. Useful for measuring impact of content changes, SEO improvements, or seasonal patterns in bot activity.',
+      'category' => 'SEO Engine',
+      'inputSchema' => [
+        'type' => 'object',
+        'properties' => [
+          'period1_start' => [
+            'type' => 'string',
+            'description' => 'Period 1 start date in YYYY-MM-DD format. Default is 60 days ago. This is your baseline/comparison period (e.g., "last month").'
+          ],
+          'period1_end' => [
+            'type' => 'string',
+            'description' => 'Period 1 end date in YYYY-MM-DD format. Default is 31 days ago. Should be before period2 for meaningful comparison.'
+          ],
+          'period2_start' => [
+            'type' => 'string',
+            'description' => 'Period 2 start date in YYYY-MM-DD format. Default is 30 days ago. This is your current/recent period (e.g., "this month").'
+          ],
+          'period2_end' => [
+            'type' => 'string',
+            'description' => 'Period 2 end date in YYYY-MM-DD format. Default is today. Marks the end of the period you\'re analyzing.'
+          ],
+          'bot_name' => [
+            'type' => 'string',
+            'description' => 'Optional: Filter comparison to a specific bot (e.g., "ClaudeBot"). Omit to compare all bot traffic across periods.'
+          ],
+          'post_id' => [
+            'type' => 'integer',
+            'description' => 'Optional: Filter comparison to a specific post ID. Useful for tracking "did bot traffic to this post increase after I updated it?". Omit for site-wide comparison.'
+          ]
+        ]
+      ]
+    ];
+
+    $tools[] = [
+      'name' => 'mwseo_bot_mix',
+      'description' => 'Analyze the distribution of bot traffic across different AI crawlers with percentage breakdowns. Also detects new bots that appeared during the period (weren\'t present in prior 30 days). Useful for understanding your bot audience composition, identifying dominant crawlers, and spotting emerging AI platforms indexing your content.',
+      'category' => 'SEO Engine',
+      'inputSchema' => [
+        'type' => 'object',
+        'properties' => [
+          'start_date' => [
+            'type' => 'string',
+            'description' => 'Analysis period start date in YYYY-MM-DD format. Defaults to 30 days ago. Defines the window for calculating distribution percentages.'
+          ],
+          'end_date' => [
+            'type' => 'string',
+            'description' => 'Analysis period end date in YYYY-MM-DD format. Defaults to today.'
+          ],
+          'post_type' => [
+            'type' => 'string',
+            'description' => 'Optional: Segment distribution by post type (e.g., "post", "page", "product"). Useful for questions like "Which bots prefer my product pages vs blog posts?". Omit for site-wide mix.'
+          ]
+        ]
+      ]
+    ];
+
+    // Magic Fix / Issues
+    $tools[] = [
+      'name' => 'mwseo_get_issues',
+      'description' => 'Get detailed SEO issues found for a post. Returns a list of specific problems (e.g., "excerpt_length", "readability_score", "alt_coverage") with their current scores and what needs to be fixed. This is the detailed breakdown that shows exactly what is wrong with the post SEO.',
+      'category' => 'SEO Engine',
+      'inputSchema' => [
+        'type' => 'object',
+        'properties' => [
+          'post_id' => [
+            'type' => 'integer',
+            'description' => 'The WordPress post ID'
+          ]
+        ],
+        'required' => ['post_id']
+      ]
+    ];
+
+    // Post Management
+    $tools[] = [
+      'name' => 'mwseo_skip_post',
+      'description' => 'Mark a post to skip SEO analysis. Use this for posts that should not be analyzed (e.g., drafts, private pages, or content you do not want indexed). The post will be excluded from SEO scoring and reports.',
+      'category' => 'SEO Engine',
+      'inputSchema' => [
+        'type' => 'object',
+        'properties' => [
+          'post_id' => [
+            'type' => 'integer',
+            'description' => 'The WordPress post ID to skip'
+          ],
+          'skip' => [
+            'type' => 'boolean',
+            'description' => 'True to skip the post, false to un-skip it',
+            'default' => true
+          ]
+        ],
+        'required' => ['post_id']
+      ]
+    ];
+
     return $tools;
   }
   
@@ -477,13 +790,53 @@ class Meow_MWSEO_MCP {
           
         // SEO Score Operations
         case 'mwseo_get_seo_score':
-          return $this->api->get_seo_score( $args['post_id'] );
+          $post = get_post( $args['post_id'] );
+          if ( !$post ) {
+            return [ 'success' => false, 'error' => 'Post not found' ];
+          }
+
+          // Get basic score info
+          $score_data = $this->api->get_seo_score( $args['post_id'] );
+
+          // Get full analysis data
+          $analysis = get_post_meta( $post->ID, '_mwseo_analysis', true );
+
+          if ( $analysis && isset( $analysis['tests'] ) ) {
+            $score_data['analysis'] = $analysis;
+          }
+
+          return [ 'success' => true, 'data' => $score_data ];
           
         case 'mwseo_do_seo_scan':
           return $this->api->do_seo_scan( $args['post_id'] );
           
         case 'mwseo_get_scored_posts':
-          return $this->api->get_scored_posts();
+          // Note: get_scored_posts() returns a bare array, not a success wrapper
+          $posts = $this->api->get_scored_posts();
+
+          if ( !is_array( $posts ) ) {
+            return [ 'success' => false, 'error' => 'Failed to retrieve scored posts' ];
+          }
+
+          // Apply filters if provided
+          if ( isset( $args['post_type'] ) && !empty( $args['post_type'] ) ) {
+            $posts = array_filter( $posts, function( $post ) use ( $args ) {
+              $post_obj = get_post( $post['id'] );
+              return $post_obj && $post_obj->post_type === $args['post_type'];
+            });
+          }
+
+          if ( isset( $args['status'] ) && !empty( $args['status'] ) ) {
+            $posts = array_filter( $posts, function( $post ) use ( $args ) {
+              return isset( $post['status'] ) && $post['status'] === $args['status'];
+            });
+          }
+
+          // Apply limit
+          $limit = $args['limit'] ?? 100;
+          $posts = array_slice( $posts, 0, $limit );
+
+          return [ 'success' => true, 'data' => array_values( $posts ) ];
           
         // Insights
         case 'mwseo_get_insights':
@@ -497,33 +850,127 @@ class Meow_MWSEO_MCP {
         case 'mwseo_set_robots_txt':
           $result = $this->api->set_robots_txt( $args['content'] );
           return [ 'success' => true, 'data' => $result ];
-          
-        // Google Analytics Operations
-        case 'mwseo_get_analytics_monthly_summary':
-          return $this->api->get_google_analytics_monthly_summary();
-          
-        case 'mwseo_get_analytics_range_summary':
-          return $this->api->get_google_analytics_range_summary( 
-            $args['start_date'], 
-            $args['end_date'] 
-          );
-          
-        case 'mwseo_get_analytics_monthly_top_posts':
-          return $this->api->get_google_analytics_monthly_top_posts();
-          
-        case 'mwseo_get_analytics_range_top_posts':
-          return $this->api->get_google_analytics_range_top_posts( 
-            $args['start_date'], 
-            $args['end_date'] 
-          );
-          
-        case 'mwseo_get_analytics_top_posts_by_country':
-          return $this->api->get_google_analytics_monthly_top_posts_by_country( 
-            $args['country'] ?? null 
-          );
-          
+
+        // Analytics Operations (Source-Agnostic)
+        case 'mwseo_get_analytics_data':
+          // metric is required - validate it exists
+          if ( empty( $args['metric'] ) ) {
+            return [ 'success' => false, 'error' => 'metric parameter is required. Must be "summary" or "top_posts".' ];
+          }
+
+          $metric = $args['metric'];
+          $start_date = $args['start_date'] ?? null;
+          $end_date = $args['end_date'] ?? null;
+          $country = $args['country'] ?? null;
+          $limit = $args['limit'] ?? 20;
+
+          if ( $metric === 'summary' ) {
+            // Use source-agnostic method (respects Display Source setting)
+            $data = $this->core->get_analytics_summary( $start_date, $end_date );
+            return [ 'success' => !empty( $data ), 'data' => $data ];
+          }
+          elseif ( $metric === 'top_posts' ) {
+            // Use source-agnostic method (respects Display Source setting)
+            $query_args = [
+              'start_date' => $start_date,
+              'end_date' => $end_date,
+              'limit' => $limit
+            ];
+
+            $top_posts = $this->core->get_top_posts( $query_args );
+
+            // Filter by country if specified (only works with Google Analytics data)
+            if ( !empty( $country ) && $country !== 'all' && is_array( $top_posts ) ) {
+              $top_posts = array_filter( $top_posts, function( $post ) use ( $country ) {
+                return isset( $post['country'] ) && $post['country'] === $country;
+              });
+              $top_posts = array_values( $top_posts );
+            }
+
+            return [ 'success' => !empty( $top_posts ), 'data' => $top_posts ];
+          }
+          else {
+            return [ 'success' => false, 'error' => 'Invalid metric. Must be "summary" or "top_posts".' ];
+          }
+
+        case 'mwseo_get_post_analytics':
+          if ( empty( $args['post_id'] ) ) {
+            return [ 'success' => false, 'error' => 'post_id parameter is required.' ];
+          }
+
+          $post_id = (int) $args['post_id'];
+          $post = get_post( $post_id );
+          if ( !$post ) {
+            return [ 'success' => false, 'error' => 'Post not found with ID ' . $post_id . '.' ];
+          }
+
+          $permalink = get_permalink( $post_id );
+          $page_path = wp_parse_url( $permalink, PHP_URL_PATH ) ?: '/';
+          $start_date = $args['start_date'] ?? null;
+          $end_date = $args['end_date'] ?? null;
+
+          $data = $this->core->get_post_analytics( $post_id, $page_path, $start_date, $end_date );
+
+          if ( empty( $data ) ) {
+            return [
+              'success' => true,
+              'data' => [
+                'post_id' => $post_id,
+                'post_title' => $post->post_title,
+                'post_url' => $permalink,
+                'message' => 'No analytics data found for this post in the selected date range.'
+              ]
+            ];
+          }
+
+          $data['post_id'] = $post_id;
+          $data['post_title'] = $post->post_title;
+          $data['post_url'] = $permalink;
+
+          return [ 'success' => true, 'data' => $data ];
+
         case 'mwseo_get_analytics_top_countries':
-          return $this->api->get_google_analytics_top_countries();
+          // Use source-agnostic method (respects Display Source setting)
+          $top_posts = $this->core->get_top_posts( [] );
+
+          if ( empty( $top_posts ) || !is_array( $top_posts ) ) {
+            return [ 'success' => false, 'data' => [] ];
+          }
+
+          // Aggregate visitor counts by country (if country data is available)
+          $country_stats = [];
+          foreach ( $top_posts as $post ) {
+            if ( isset( $post['country'] ) ) {
+              $country = $post['country'];
+              // Use unique_visitors if available, fallback to visits, then to 1
+              $visitors = isset( $post['unique_visitors'] ) ? (int) $post['unique_visitors'] :
+                         (isset( $post['visits'] ) ? (int) $post['visits'] : 1);
+
+              if ( !isset( $country_stats[$country] ) ) {
+                $country_stats[$country] = [
+                  'country' => $country,
+                  'visitors' => 0
+                ];
+              }
+              $country_stats[$country]['visitors'] += $visitors;
+            }
+          }
+
+          // If no country data found (e.g., Private Analytics), return error
+          if ( empty( $country_stats ) ) {
+            return [
+              'success' => false,
+              'error' => 'Country data not available with current analytics source. This feature requires Google Analytics or Plausible Analytics.',
+              'data' => []
+            ];
+          }
+
+          // Sort by visitor count descending
+          usort( $country_stats, function( $a, $b ) {
+            return $b['visitors'] - $a['visitors'];
+          });
+
+          return [ 'success' => true, 'data' => array_values( $country_stats ) ];
           
         // Utility Tools
         case 'mwseo_get_post_by_slug':
@@ -553,19 +1000,22 @@ class Meow_MWSEO_MCP {
           
         // Advanced SEO Tools
         case 'mwseo_get_posts_by_score_range':
+          // Note: get_scored_posts() returns a bare array, not a success wrapper
           $posts = $this->api->get_scored_posts();
-          if ( !$posts['success'] ) {
-            return $posts;
+
+          if ( !is_array( $posts ) ) {
+            return [ 'success' => false, 'error' => 'Failed to retrieve scored posts' ];
           }
-          
-          $filtered = array_filter( $posts['data'], function( $post ) use ( $args ) {
+
+          $filtered = array_filter( $posts, function( $post ) use ( $args ) {
             $score = $post['score'] ?? 0;
             return $score >= $args['min_score'] && $score <= $args['max_score'];
           });
-          
+
           return [ 'success' => true, 'data' => array_values( $filtered ) ];
           
         case 'mwseo_get_posts_missing_seo':
+          // TODO: meta_key_seo_title and meta_key_seo_excerpt should migrate to _mwseo_title and _mwseo_excerpt
           $query_args = [
             'post_type' => !empty($args['post_type']) ? $args['post_type'] : ['post', 'page'],
             'posts_per_page' => $args['limit'] ?? 50,
@@ -597,7 +1047,57 @@ class Meow_MWSEO_MCP {
           }
           
           return [ 'success' => true, 'data' => $results ];
-          
+
+        case 'mwseo_get_posts_needing_seo':
+          // Find posts where the EFFECTIVE SEO (custom or auto-generated) has actual problems
+          $post_type = !empty( $args['post_type'] ) ? $args['post_type'] : ['post', 'page'];
+          $issue_type = $args['issue_type'] ?? 'any';
+          $limit = $args['limit'] ?? 50;
+
+          $posts = get_posts( [
+            'post_type' => $post_type,
+            'posts_per_page' => -1, // Get all, then filter
+            'post_status' => 'publish'
+          ] );
+
+          $results = [];
+          foreach ( $posts as $post ) {
+            $seo_eval = $this->evaluate_effective_seo( $post );
+
+            // Filter by issue type
+            $has_relevant_issue = false;
+            if ( $issue_type === 'title' && !empty( $seo_eval['title_issues'] ) ) {
+              $has_relevant_issue = true;
+            } elseif ( $issue_type === 'description' && !empty( $seo_eval['description_issues'] ) ) {
+              $has_relevant_issue = true;
+            } elseif ( $issue_type === 'any' && $seo_eval['needs_attention'] ) {
+              $has_relevant_issue = true;
+            }
+
+            if ( $has_relevant_issue ) {
+              $results[] = [
+                'post_id' => $post->ID,
+                'post_title' => $post->post_title,
+                'post_type' => $post->post_type,
+                'permalink' => get_permalink( $post->ID ),
+                'effective_title' => $seo_eval['effective_title'],
+                'effective_description' => $seo_eval['effective_description'],
+                'title_display_width' => $seo_eval['title_display_width'],
+                'description_display_width' => $seo_eval['description_display_width'],
+                'title_issues' => $seo_eval['title_issues'],
+                'description_issues' => $seo_eval['description_issues'],
+                'has_custom_title' => $seo_eval['has_custom_title'],
+                'has_custom_description' => $seo_eval['has_custom_description']
+              ];
+
+              if ( count( $results ) >= $limit ) {
+                break;
+              }
+            }
+          }
+
+          return [ 'success' => true, 'data' => $results ];
+
         case 'mwseo_search_posts':
           $query_args = [
             's' => $args['search_term'],
@@ -713,8 +1213,10 @@ class Meow_MWSEO_MCP {
         case 'mwseo_get_seo_statistics':
           $stats = [
             'total_posts' => 0,
+            // Custom SEO counts (for backward compatibility)
             'posts_with_seo_title' => 0,
             'posts_with_seo_excerpt' => 0,
+            // Scoring stats
             'posts_with_score' => 0,
             'average_score' => 0,
             'score_distribution' => [
@@ -723,35 +1225,51 @@ class Meow_MWSEO_MCP {
               'C' => 0,
               'D' => 0,
               'F' => 0
-            ]
+            ],
+            // NEW: Actual issue counts (these are what matter for prioritization)
+            'posts_with_title_issues' => 0,
+            'posts_with_description_issues' => 0,
+            'posts_needing_attention' => 0
           ];
-          
+
           $posts = get_posts( [
             'post_type' => ['post', 'page'],
             'posts_per_page' => -1,
             'post_status' => 'publish'
           ] );
-          
+
           $total_score = 0;
           $scored_posts = 0;
-          
+
           foreach ( $posts as $post ) {
             $stats['total_posts']++;
-            
+
             if ( get_post_meta( $post->ID, $this->core->meta_key_seo_title, true ) ) {
               $stats['posts_with_seo_title']++;
             }
-            
+
             if ( get_post_meta( $post->ID, $this->core->meta_key_seo_excerpt, true ) ) {
               $stats['posts_with_seo_excerpt']++;
             }
-            
+
+            // Evaluate effective SEO quality (custom or auto-generated)
+            $seo_eval = $this->evaluate_effective_seo( $post );
+            if ( !empty( $seo_eval['title_issues'] ) ) {
+              $stats['posts_with_title_issues']++;
+            }
+            if ( !empty( $seo_eval['description_issues'] ) ) {
+              $stats['posts_with_description_issues']++;
+            }
+            if ( $seo_eval['needs_attention'] ) {
+              $stats['posts_needing_attention']++;
+            }
+
             $score = get_post_meta( $post->ID, '_mwseo_score', true );
             if ( $score ) {
               $stats['posts_with_score']++;
               $total_score += (int) $score;
               $scored_posts++;
-              
+
               // Determine grade
               if ( $score >= 90 ) $stats['score_distribution']['A']++;
               elseif ( $score >= 80 ) $stats['score_distribution']['B']++;
@@ -760,21 +1278,196 @@ class Meow_MWSEO_MCP {
               else $stats['score_distribution']['F']++;
             }
           }
-          
+
           if ( $scored_posts > 0 ) {
             $stats['average_score'] = round( $total_score / $scored_posts, 1 );
           }
-          
-          $stats['seo_title_coverage'] = round( ( $stats['posts_with_seo_title'] / $stats['total_posts'] ) * 100, 1 );
-          $stats['seo_excerpt_coverage'] = round( ( $stats['posts_with_seo_excerpt'] / $stats['total_posts'] ) * 100, 1 );
-          
+
+          // Rates (renamed from "coverage" for clarity - low rate is fine if auto-generated SEO is good)
+          $stats['custom_title_rate'] = round( ( $stats['posts_with_seo_title'] / $stats['total_posts'] ) * 100, 1 );
+          $stats['custom_excerpt_rate'] = round( ( $stats['posts_with_seo_excerpt'] / $stats['total_posts'] ) * 100, 1 );
+          // Keep old names for backward compatibility
+          $stats['seo_title_coverage'] = $stats['custom_title_rate'];
+          $stats['seo_excerpt_coverage'] = $stats['custom_excerpt_rate'];
+
           return [ 'success' => true, 'data' => $stats ];
+
+        // AI Keywords
+        case 'mwseo_get_ai_keywords':
+          $post = get_post( $args['post_id'] );
+          if ( !$post ) {
+            return [ 'success' => false, 'error' => 'Post not found' ];
+          }
+
+          $keywords = get_post_meta( $post->ID, '_mwseo_keywords', true );
+          return [
+            'success' => true,
+            'data' => [
+              'post_id' => $post->ID,
+              'keywords' => $keywords ?: []
+            ]
+          ];
+
+        case 'mwseo_set_ai_keywords':
+          $post = get_post( $args['post_id'] );
+          if ( !$post ) {
+            return [ 'success' => false, 'error' => 'Post not found' ];
+          }
+
+          $keywords = $args['keywords'];
+          if ( !is_array( $keywords ) ) {
+            return [ 'success' => false, 'error' => 'Keywords must be an array' ];
+          }
+
+          // Limit to 10 keywords max
+          $keywords = array_slice( $keywords, 0, 10 );
+
+          update_post_meta( $post->ID, '_mwseo_keywords', $keywords );
+          return [
+            'success' => true,
+            'data' => [
+              'post_id' => $post->ID,
+              'keywords' => $keywords
+            ],
+            'message' => 'AI keywords updated successfully'
+          ];
+
+        // Bot Analytics - Advanced Tools
+        case 'mwseo_query_bot_traffic':
+          $query_args = array(
+            'start_date' => $args['start_date'] ?? null,
+            'end_date' => $args['end_date'] ?? null,
+            'post_id' => $args['post_id'] ?? null,
+            'bot_name' => $args['bot_name'] ?? null,
+            'group_by' => $args['group_by'] ?? null,
+            'metric' => $args['metric'] ?? 'visits'
+          );
+
+          $result = $this->core->query_bot_traffic( $query_args );
+          return [ 'success' => true, 'data' => $result ];
+
+        case 'mwseo_rank_posts_for_bots':
+          $rank_args = array(
+            'order' => $args['order'] ?? 'most',
+            'limit' => $args['limit'] ?? 20,
+            'min_visits' => $args['min_visits'] ?? 0,
+            'bot_name' => $args['bot_name'] ?? null,
+            'post_type' => $args['post_type'] ?? null,
+            'days' => $args['days'] ?? 30
+          );
+
+          $result = $this->core->rank_posts_for_bots( $rank_args );
+          return [ 'success' => true, 'data' => $result ];
+
+        case 'mwseo_bot_profile':
+          if ( empty( $args['bot_name'] ) ) {
+            return [ 'success' => false, 'error' => 'bot_name is required' ];
+          }
+
+          $result = $this->core->get_bot_profile(
+            $args['bot_name'],
+            $args['start_date'] ?? null,
+            $args['end_date'] ?? null
+          );
+
+          return [ 'success' => true, 'data' => $result ];
+
+        case 'mwseo_compare_bot_periods':
+          $compare_args = array(
+            'period1_start' => $args['period1_start'] ?? null,
+            'period1_end' => $args['period1_end'] ?? null,
+            'period2_start' => $args['period2_start'] ?? null,
+            'period2_end' => $args['period2_end'] ?? null,
+            'bot_name' => $args['bot_name'] ?? null,
+            'post_id' => $args['post_id'] ?? null
+          );
+
+          $result = $this->core->compare_bot_periods( $compare_args );
+          return [ 'success' => true, 'data' => $result ];
+
+        case 'mwseo_bot_mix':
+          $mix_args = array(
+            'start_date' => $args['start_date'] ?? null,
+            'end_date' => $args['end_date'] ?? null,
+            'post_type' => $args['post_type'] ?? null
+          );
+
+          $result = $this->core->get_bot_mix( $mix_args );
+          return [ 'success' => true, 'data' => $result ];
+
+        // Magic Fix / Issues
+        case 'mwseo_get_issues':
+          $post = get_post( $args['post_id'] );
+          if ( !$post ) {
+            return [ 'success' => false, 'error' => 'Post not found' ];
+          }
+
+          // Get the full analysis data
+          $analysis = get_post_meta( $post->ID, '_mwseo_analysis', true );
+          $codes = get_post_meta( $post->ID, '_mwseo_codes', true );
+
+          if ( !$analysis || !isset( $analysis['tests'] ) ) {
+            return [
+              'success' => false,
+              'error' => 'No analysis found for this post. Run mwseo_do_seo_scan first.'
+            ];
+          }
+
+          // Build issues list
+          $issues = [];
+          foreach ( $analysis['tests'] as $test_name => $score ) {
+            if ( $score === 'NA' ) continue;
+
+            if ( $score < 70 ) {
+              $issues[] = [
+                'test' => $test_name,
+                'score' => $score,
+                'severity' => $score < 40 ? 'high' : ( $score < 70 ? 'medium' : 'low' )
+              ];
+            }
+          }
+
+          return [
+            'success' => true,
+            'data' => [
+              'post_id' => $post->ID,
+              'overall_score' => $analysis['overall'] ?? 0,
+              'issues' => $issues,
+              'codes' => $codes ?: []
+            ]
+          ];
+
+        // Post Management
+        case 'mwseo_skip_post':
+          $post = get_post( $args['post_id'] );
+          if ( !$post ) {
+            return [ 'success' => false, 'error' => 'Post not found' ];
+          }
+
+          $skip = $args['skip'] ?? true;
+
+          if ( $skip ) {
+            update_post_meta( $post->ID, '_mwseo_status', 'skip' );
+            $message = 'Post marked to skip SEO analysis';
+          } else {
+            delete_post_meta( $post->ID, '_mwseo_status', 'skip' );
+            $message = 'Post unmarked from skip list';
+          }
+
+          return [
+            'success' => true,
+            'data' => [
+              'post_id' => $post->ID,
+              'skipped' => $skip
+            ],
+            'message' => $message
+          ];
       }
     }
     catch ( Exception $e ) {
       return [ 'success' => false, 'error' => $e->getMessage() ];
     }
-    
+
     return $result;
   }
 }

@@ -1,5 +1,5 @@
 <?php
-class Meow_MWSEO_Admin extends MeowCommon_Admin {
+class Meow_MWSEO_Admin extends MeowKit_MWSEO_Admin {
 
 	public $core;
 
@@ -28,7 +28,6 @@ class Meow_MWSEO_Admin extends MeowCommon_Admin {
 			}
 
 			if ( $is_wc_assistant_enabled && ( $is_wc_product || $is_wc_new_product ) ) {
-				error_log('is_wc_product && $is_wc_assistant_enabled');
 				add_action( 'admin_enqueue_scripts', array( $this, 'admin_enqueue_scripts' ) );
 			}
 		}
@@ -37,13 +36,13 @@ class Meow_MWSEO_Admin extends MeowCommon_Admin {
 		add_action( 'wp_head', array( $this, 'seo_engine_sitemap_headers' ) );
 	}
 
-	function seo_engine_sitemap_headers( $headers ) {
+	function seo_engine_sitemap_headers() {
 
 		$disabled = $this->core->get_option( 'disable_wp_sitemap', false );
    		$custom   = $this->core->get_option( 'sitemap_custom', false );
 
 		if( $disabled && !$custom ) {
-			return $headers;
+			return;
 		}
 
 		$excluded_posts = $this->core->get_option( 'sitemap_excluded_post_ids', [] );
@@ -51,17 +50,15 @@ class Meow_MWSEO_Admin extends MeowCommon_Admin {
 		$post_id = get_the_ID();
 
 		if( !in_array( $post_id, $excluded_posts ) ) {
-			return $headers;
+			return;
 		}
 
 		echo '<!-- SEO Engine: This post is excluded from the sitemap -->';
 		echo '<meta name="robots" content="noindex, follow">';
-		
-		return $headers;
 	}
 
-	function seo_engine_headers( $headers ) {
-		if( !$this->core->get_option( 'social_networks', false ) ) { return $headers;}
+	function seo_engine_headers() {
+		if( !$this->core->get_option( 'social_networks', false ) ) { return; }
 
 		// use open graph tags for social networks, we should use the featured image, title and excerpt
 		if ( is_single() || is_page() ) {
@@ -130,8 +127,6 @@ class Meow_MWSEO_Admin extends MeowCommon_Admin {
 
 			echo '<!-- Open Graph Meta Tags Powered With Love By SEO Engine 😽 -->';
 		}
-		
-		return $headers;
 	}
 
 	function admin_enqueue_scripts() {
@@ -162,7 +157,7 @@ class Meow_MWSEO_Admin extends MeowCommon_Admin {
 			'site_name' => get_bloginfo('name'),
 			'options' => $this->core->sanitized_options(),
 			'google_analytics' => $this->core->get_google_analytics_state(),
-			'last_insights' => $this->core->get_last_insights(),
+			'blog_name' => trim( get_bloginfo( 'name' ) ),
 			'active_seo_plugins' => [
 				'yoast'      => class_exists( 'WPSEO_Frontend' ),
 				'all_in_one' => class_exists( 'All_in_One_SEO_Pack' ),

@@ -18,11 +18,11 @@ spl_autoload_register(function ( $class ) {
     else if ( strpos( $class, 'Meow_MWSEO_' ) !== false ) {
       $file = MWSEO_PATH . '/classes/' . str_replace( 'meow_mwseo_', '', strtolower( $class ) ) . '.php';
     }
-    else if ( strpos( $class, 'MeowCommon_' ) !== false ) {
-      $file = MWSEO_PATH . '/common/' . str_replace( 'meowcommon_', '', strtolower( $class ) ) . '.php';
+    else if ( strpos( $class, 'MeowKit_MWSEO_' ) !== false ) {
+      $file = MWSEO_PATH . '/common/' . str_replace( 'meowkit_mwseo_', '', strtolower( $class ) ) . '.php';
     }
-    else if ( strpos( $class, 'MeowCommonPro_' ) !== false ) {
-      $file = MWSEO_PATH . '/common/premium/' . str_replace( 'meowcommonpro_', '', strtolower( $class ) ) . '.php';
+    else if ( strpos( $class, 'MeowKitPro_MWSEO_' ) !== false ) {
+      $file = MWSEO_PATH . '/common/premium/' . str_replace( 'meowkitpro_mwseo_', '', strtolower( $class ) ) . '.php';
     }
     else if ( strpos( $class, 'MeowPro_MWSEO_Ranks' ) !== false ) {
       $file = MWSEO_PATH . '/premium/ranks/' . str_replace( 'meowpro_mwseo_ranks_', '', strtolower( $class ) ) . '.php';
@@ -42,7 +42,7 @@ spl_autoload_register(function ( $class ) {
   }
 });
 
-//require_once( MWSEO_PATH . '/classes/api.php');
+require_once( MWSEO_PATH . '/classes/api.php');
 require_once( MWSEO_PATH . '/common/helpers.php');
 
 

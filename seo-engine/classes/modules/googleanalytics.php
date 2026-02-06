@@ -1,5 +1,6 @@
 <?php
 
+// TODO [2025]: Refactor to unified analytics provider interface
 class Meow_MWSEO_Modules_GoogleAnalytics
 {
 	private $core = null;
@@ -18,6 +19,7 @@ class Meow_MWSEO_Modules_GoogleAnalytics
 	private $current_access_token = null;
 	private $current_refresh_token = null;
 	private $current_expires_at = null;
+	private $last_api_error = null;
 
   	const TOKEN_URL = 'https://www.googleapis.com/oauth2/v4/token';
 	const AUTH_URL = 'https://accounts.google.com/o/oauth2/v2/auth';
@@ -52,7 +54,7 @@ class Meow_MWSEO_Modules_GoogleAnalytics
 
 	public function init()
 	{
-		$this->use_cache    = $this->core->get_option( 'google_analytics_cache', false );
+		$this->use_cache    = $this->core->get_option( 'analytics_cache', false );
 		$this->property_ids = $this->core->get_option( 'google_analytics_property_ids', array() );
 		$this->property_id  = $this->core->get_option( 'google_analytics_property_id' );
 
@@ -106,6 +108,10 @@ class Meow_MWSEO_Modules_GoogleAnalytics
 		return true;
   	}
 
+	public function get_last_error() {
+		return $this->last_api_error;
+	}
+
 	public function unlink() {
 		$this->core->log( "🔗 Unlinking Google Analytics." );
 
@@ -135,8 +141,6 @@ class Meow_MWSEO_Modules_GoogleAnalytics
 		}
 
 		if ( $this->get_access_token( $code ) ) {
-			$this->core->log( "✅ Successfully authenticated with Google Analytics." );
-
 			return true;
 		} else {
 			$this->core->log( "⚠️ Failed to authenticate with Google Analytics." );
@@ -161,7 +165,6 @@ class Meow_MWSEO_Modules_GoogleAnalytics
 	private function get_access_token( $code ) {
 
 		if( $this->is_authenticated() ) {
-			$this->core->log( "✅ Already authenticated with Google Analytics." );
 			return true;
 		}
 
@@ -176,6 +179,12 @@ class Meow_MWSEO_Modules_GoogleAnalytics
 		);
 
 		$result = wp_remote_post( self::TOKEN_URL, $options );
+
+		if ( is_wp_error( $result ) ) {
+			$this->core->log( "⚠️ Error retrieving access token: " . $result->get_error_message() );
+			return false;
+		}
+
 		$json = json_decode( $result['body'] );
 
 		if ( isset( $json->error ) ) {
@@ -196,10 +205,15 @@ class Meow_MWSEO_Modules_GoogleAnalytics
 
 		set_transient( self::TRANSIENT_TOKEN_INFO, $token_info );
 
+		// Update instance variables so current request can use the new token
+		$this->current_access_token = $access_token;
+		$this->current_refresh_token = $refresh_token;
+		$this->current_expires_at = time() + $expires_in;
+
 		return true;
 	}
 
-	  public function get_refresh_token() {
+	public function get_refresh_token() {
 
 		$options = array( 
 			'body' => array(
@@ -235,8 +249,12 @@ class Meow_MWSEO_Modules_GoogleAnalytics
 
 		set_transient( self::TRANSIENT_TOKEN_INFO, $token_info );
 
+		// Update instance variables so current request uses the new token
+		$this->current_access_token = $access_token;
+		$this->current_expires_at = time() + $expires_in;
+
 		return true;
-  	}  
+  	}
 
 	#endregion
 
@@ -318,6 +336,7 @@ class Meow_MWSEO_Modules_GoogleAnalytics
 	#region Analytics
 
 
+	// TODO [2025]: Refactor to unified analytics provider interface
 	public function get_analytics_data( $args = array() )
 	{
 
@@ -342,7 +361,6 @@ class Meow_MWSEO_Modules_GoogleAnalytics
 
 			$cached_report = get_transient( $transient_key );
 			if ( $cached_report !== false ) {
-				$this->core->log( "✅ Using cached Google Analytics Data for args: " . json_encode( $args ) );
 				return $cached_report;
 			}
 
@@ -356,17 +374,17 @@ class Meow_MWSEO_Modules_GoogleAnalytics
 			if ( !empty( $report ) && $this->use_cache ) {
 				// Cache the report
 				set_transient( $transient_key, $report, 12 * HOUR_IN_SECONDS );
-				$this->core->log( "✅ Cached Google Analytics report for args: " . json_encode( $args ) );
-			} 
+			}
 
 			return $report;
 
 		} catch ( Exception $e ) {
 			$this->core->log( "❌ Google Analytics API Error: " . $e->getMessage() );
-			return array();
+			throw $e; // Re-throw to propagate to REST endpoint
 		}
 	}
 
+	// TODO [2025]: Refactor to unified analytics provider interface
 	public function get_analytics_summary( $start_date = null, $end_date = null )
 	{
 		if ( !$this->is_authenticated() ) {
@@ -389,10 +407,9 @@ class Meow_MWSEO_Modules_GoogleAnalytics
 		if ( $this->use_cache ) {
 			$prefix = self::TRANSIENT_REPORT_PREFIX . 'analytics_summary_' . $this->property_id . '_';
 			$transient_key =  $prefix . md5( serialize( $args ) );
-			
+
 			$cached_report = get_transient( $transient_key );
 			if ( $cached_report !== false ) {
-				$this->core->log( "✅ Using cached Google Analytics Summary report for args: " . json_encode( $args ) );
 				return $cached_report;
 			}
 		}
@@ -404,15 +421,78 @@ class Meow_MWSEO_Modules_GoogleAnalytics
 			if ( !empty( $result ) && $this->use_cache ) {
 				// Cache the report
 				set_transient( $transient_key, $result, 12 * HOUR_IN_SECONDS );
-				$this->core->log( "✅ Cached Google Analytics Summary report for args: " . json_encode( $args ) );
 			}
 
 			return $result;
 
 		} catch ( Exception $e ) {
 			$this->core->log( "❌ Google Analytics API Error: " . $e->getMessage() );
+			throw $e; // Re-throw to propagate to REST endpoint
+		}
+	}
+
+	// TODO [2025]: Refactor to unified analytics provider interface
+	public function get_post_analytics( $page_path, $start_date = null, $end_date = null )
+	{
+		if ( !$this->is_authenticated() ) {
 			return array();
 		}
+
+		if ( !$start_date ) {
+			$start_date = date( 'Y-m-d', strtotime( '-30 days' ) );
+		}
+		if ( !$end_date ) {
+			$end_date = date( 'Y-m-d' );
+		}
+
+		$request_data = array(
+			'dateRanges' => array(
+				array(
+					'startDate' => $start_date,
+					'endDate' => $end_date
+				)
+			),
+			'dimensions' => array(
+				array( 'name' => 'pagePath' ),
+				array( 'name' => 'hostName' )
+			),
+			'metrics' => array(
+				array( 'name' => 'sessions' ),
+				array( 'name' => 'totalUsers' ),
+				array( 'name' => 'screenPageViews' ),
+				array( 'name' => 'averageSessionDuration' ),
+				array( 'name' => 'bounceRate' )
+			),
+			'dimensionFilter' => array(
+				'filter' => array(
+					'fieldName' => 'pagePath',
+					'stringFilter' => array(
+						'matchType' => 'EXACT',
+						'value' => $page_path
+					)
+				)
+			),
+			'limit' => 1
+		);
+
+		$response = $this->make_google_analytics_request( 'runReport', $request_data );
+
+		if ( !$response || !isset( $response['rows'] ) || empty( $response['rows'] ) ) {
+			return array();
+		}
+
+		$row = $response['rows'][0];
+		$host = isset( $row['dimensionValues'][1]['value'] ) ? $row['dimensionValues'][1]['value'] : '';
+
+		return array(
+			'visits' => isset( $row['metricValues'][0]['value'] ) ? (int) $row['metricValues'][0]['value'] : 0,
+			'unique_visitors' => isset( $row['metricValues'][1]['value'] ) ? (int) $row['metricValues'][1]['value'] : 0,
+			'pageviews' => isset( $row['metricValues'][2]['value'] ) ? (int) $row['metricValues'][2]['value'] : 0,
+			'avg_time_on_page' => isset( $row['metricValues'][3]['value'] ) ? round( (float) $row['metricValues'][3]['value'] ) : 0,
+			'bounce_rate' => isset( $row['metricValues'][4]['value'] ) ? round( (float) $row['metricValues'][4]['value'] * 100, 1 ) : 0,
+			'page_path' => $page_path,
+			'host' => $host
+		);
 	}
 
 	public function get_top_posts( $args = array() )
@@ -434,10 +514,9 @@ class Meow_MWSEO_Modules_GoogleAnalytics
 		if ( $this->use_cache ) {
 			$prefix = self::TRANSIENT_REPORT_PREFIX . 'top_posts_' . $this->property_id . '_';
 			$transient_key =  $prefix . md5( serialize( $args ) );
-			
+
 			$cached_report = get_transient( $transient_key );
 			if ( $cached_report !== false ) {
-				$this->core->log( "✅ Using cached Google Top Posts report for args: " . json_encode( $args ) );
 				return $cached_report;
 			}
 		}
@@ -449,14 +528,13 @@ class Meow_MWSEO_Modules_GoogleAnalytics
 			if ( !empty( $result ) && $this->use_cache ) {
 				// Cache the report
 				set_transient( $transient_key, $result, 12 * HOUR_IN_SECONDS );
-				$this->core->log( "✅ Cached Google Top Posts report for args: " . json_encode( $args ) );
 			}
 
 			return $result;
 
 		} catch ( Exception $e ) {
 			$this->core->log( "❌ Google Analytics API Error: " . $e->getMessage() );
-			return array();
+			throw $e; // Re-throw to propagate to REST endpoint
 		}
 	}
 
@@ -590,10 +668,14 @@ class Meow_MWSEO_Modules_GoogleAnalytics
 
 	private function make_google_analytics_request( $endpoint, $data )
 	{
+		// Clear previous error
+		$this->last_api_error = null;
+
 		// Get access token
 		$access_token = $this->current_access_token;
 		if ( ! $access_token ) {
-			$this->core->log( "❌ Failed to obtain access token" );
+			$this->last_api_error = 'Failed to obtain access token';
+			$this->core->log( "❌ " . $this->last_api_error );
 			return false;
 		}
 
@@ -611,21 +693,30 @@ class Meow_MWSEO_Modules_GoogleAnalytics
 		$response = wp_remote_post( $url, $args );
 
 		if ( is_wp_error( $response ) ) {
-			$this->core->log( "❌ Google Analytics API Request Error: " . $response->get_error_message() );
-			return false;
+			$this->last_api_error = $response->get_error_message();
+			$this->core->log( "❌ Google Analytics API Request Error: " . $this->last_api_error );
+			throw new Exception( $this->last_api_error );
 		}
 
 		$response_code = wp_remote_retrieve_response_code( $response );
 		$response_body = wp_remote_retrieve_body( $response );
 
 		if ( $response_code !== 200 ) {
+			// Parse error message from response body if available
+			$decoded_error = json_decode( $response_body, true );
+			if ( isset( $decoded_error['error']['message'] ) ) {
+				$this->last_api_error = $decoded_error['error']['message'];
+			} else {
+				$this->last_api_error = "HTTP Error " . $response_code;
+			}
 			$this->core->log( "❌ Google Analytics API HTTP Error: " . $response_code . " - " . $response_body );
-			return false;
+			throw new Exception( $this->last_api_error );
 		}
 
 		$decoded_response = json_decode( $response_body, true );
 
 		if ( json_last_error() !== JSON_ERROR_NONE ) {
+			$this->last_api_error = 'JSON Decode Error: ' . json_last_error_msg();
 			$this->core->log( "❌ Google Analytics API JSON Decode Error: " . json_last_error_msg() );
 			return false;
 		}
@@ -871,7 +962,6 @@ class Meow_MWSEO_Modules_GoogleAnalytics
 			$transient_key = self::TRANSIENT_REPORT_PREFIX . 'realtime_data' . $this->property_id;
 			$cached_report = get_transient( $transient_key );
 			if ( $cached_report !== false ) {
-				$this->core->log( "✅ Using cached Google Realtime report" );
 				return $cached_report;
 			}
 		}
@@ -903,7 +993,6 @@ class Meow_MWSEO_Modules_GoogleAnalytics
 			// Cache
 			if ( ! empty( $result ) && $this->use_cache ) {
 				set_transient( $transient_key, $result, 5 * MINUTE_IN_SECONDS );
-				$this->core->log( "✅ Cached Google Realtime report" );
 			}
 
 			return $result;
@@ -937,23 +1026,32 @@ class Meow_MWSEO_Modules_GoogleAnalytics
 		$response = wp_remote_post( $url, $args );
 
 		if ( is_wp_error( $response ) ) {
-			$this->core->log( "❌ Google Analytics Realtime API Request Error: " . $response->get_error_message() );
-			return false;
+			$error_message = $response->get_error_message();
+			$this->core->log( "❌ Google Analytics Realtime API Request Error: " . $error_message );
+			throw new Exception( $error_message );
 		}
 
 		$response_code = wp_remote_retrieve_response_code( $response );
 		$response_body = wp_remote_retrieve_body( $response );
 
 		if ( $response_code !== 200 ) {
+			// Parse error message from response body if available
+			$decoded_error = json_decode( $response_body, true );
+			if ( isset( $decoded_error['error']['message'] ) ) {
+				$error_message = $decoded_error['error']['message'];
+			} else {
+				$error_message = "HTTP Error " . $response_code;
+			}
 			$this->core->log( "❌ Google Analytics Realtime API HTTP Error: " . $response_code . " - " . $response_body );
-			return false;
+			throw new Exception( $error_message );
 		}
 
 		$decoded_response = json_decode( $response_body, true );
 
 		if ( json_last_error() !== JSON_ERROR_NONE ) {
+			$error_message = 'JSON Decode Error: ' . json_last_error_msg();
 			$this->core->log( "❌ Google Analytics Realtime API JSON Decode Error: " . json_last_error_msg() );
-			return false;
+			throw new Exception( $error_message );
 		}
 
 		return $decoded_response;

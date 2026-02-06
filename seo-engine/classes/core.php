@@ -5,28 +5,36 @@ class Meow_MWSEO_Core
 	public $admin = null;
 	public $is_rest = false;
 	public $site_url = null;
+	public $pro = null; // Premium features
 
+	// TODO: Migrate to _mwseo_title
 	public $meta_key_seo_title = '_kiss_seo_title';
+	// TODO: Migrate to _mwseo_excerpt
 	public $meta_key_seo_excerpt = '_kiss_seo_excerpt';
+	// TODO: Migrate to _mwseo_ignore
 	public $meta_key_skip = '_kiss_seo_ignore';
-	public $meta_key_seo_keywords = '_seo_ai_keywords';
+	public $meta_key_seo_keywords = '_mwseo_keywords';
 
 	private $old_option_name = 'seo_kiss_options';
 	private $option_name = 'mwseo_options';
 
 	private $sitemap_module = null;
+	private $schema_module = null;
 	private $insights_module = null;
 	private $analytics_module = null;
 	private $googleanalytics_module = null;
 
 	public function __construct() {
+		global $mwseo_core;
+		$mwseo_core = $this;
+
 		$this->site_url = get_site_url();
-		$this->is_rest = MeowCommon_Helpers::is_rest();
+		$this->is_rest = MeowKit_MWSEO_Helpers::is_rest();
 
 		add_action( 'plugins_loaded', array( $this, 'init' ) );
 
-		$analyze_on_update = $this->get_option( 'analyze_on_update', false );
-		if ( $analyze_on_update ) {
+		$analyze_on_update = $this->get_option( 'analyze_on_update', 'none' );
+		if ( $analyze_on_update !== 'none' && $analyze_on_update !== false ) {
 			add_action( 'save_post', array( $this, 'analyze_on_update' ), 10, 3 );
 		}
 	}
@@ -66,8 +74,17 @@ class Meow_MWSEO_Core
 
 		// Website
 		//add_filter( 'wp_title', [ $this, 'render_title' ], 10, 2 );
-		add_filter( 'pre_get_document_title', [ $this, 'render_title' ], 99, 1 );
-		add_action( 'wp_head', [ $this, 'render_description' ], 99, 0 );
+		$use_content_seo = $this->get_option( 'content_seo', false );
+		$use_technical_seo = $this->get_option( 'technical_seo', false );
+		$use_seo_metadata = $this->get_option( 'use_seo_metadata', true );
+		$auto_page_title = $this->get_option( 'auto_page_title', true );
+		if ( ( $use_content_seo || $use_technical_seo ) && $auto_page_title ) {
+			add_filter( 'pre_get_document_title', [ $this, 'render_title' ], 99, 1 );
+		}
+		if ( $use_content_seo && $use_seo_metadata ) {
+			add_action( 'wp_head', [ $this, 'render_description' ], 99, 0 );
+		}
+
 		add_action( 'init', [ $this, 'reject_gptbot_user_agent' ], 99, 0 );
 
 
@@ -78,12 +95,17 @@ class Meow_MWSEO_Core
 
 		// Advanced Core
 		if ( class_exists( 'MeowPro_MWSEO_Core' ) ) {
-			new MeowPro_MWSEO_Core( $this );
+			$this->pro = new MeowPro_MWSEO_Core( $this );
 		}
 
 		// Insights
 		if ( class_exists( 'Meow_MWSEO_Modules_Insights' ) ) {
 			$this->insights_module = new Meow_MWSEO_Modules_Insights( $this );
+		}
+
+		// Schema
+		if ( class_exists( 'Meow_MWSEO_Modules_Schema' ) ) {
+			$this->schema_module = new Meow_MWSEO_Modules_Schema( $this );
 		}
 
 		// Analytics
@@ -176,6 +198,24 @@ class Meow_MWSEO_Core
 		if ( !$enabled ) { return; }
 
 		$log_file_path = $this->get_logs_path();
+
+		// Check log file size and rotate if too large (1MB limit)
+		if ( file_exists( $log_file_path ) ) {
+			$file_size = filesize( $log_file_path );
+			$max_size = apply_filters( 'mwseo_max_log_size', 1 * 1024 * 1024 ); // 1MB default
+
+			if ( $file_size > $max_size ) {
+				@unlink( $log_file_path );
+				// Log the rotation event
+				$fh = @fopen( $log_file_path, 'w' );
+				if ( $fh ) {
+					$date = date( "Y-m-d H:i:s" );
+					fwrite( $fh, "$date: 🔄 Log file rotated (exceeded " . size_format( $max_size ) . ")\n\n" );
+					fclose( $fh );
+				}
+			}
+		}
+		
 		$fh = @fopen( $log_file_path, 'a' );
 		if ( !$fh ) { return false; }
 		$date = date( "Y-m-d H:i:s" );
@@ -217,8 +257,10 @@ class Meow_MWSEO_Core
 	}
 
 
-	function reject_gptbot_user_agent() {
+	function reject_gptbot_user_agent()
+	{
 		$disallow_gpt_bot = $this->get_option( 'disallow_gpt_bot', false );
+
 		if ( $disallow_gpt_bot && isset($_SERVER[ 'HTTP_USER_AGENT' ]) && strpos( $_SERVER[ 'HTTP_USER_AGENT' ], 'GPTBot' ) !== false ) {
 			$this->log( '🤖 GPTBot has been detected and blocked.');
 			header( 'HTTP/1.1 403 Forbidden' );
@@ -301,37 +343,103 @@ class Meow_MWSEO_Core
 	function analyze_on_update( $post_id, $post, $update ) {
 		global $mwseo_score;
 		if ( $mwseo_score ) {
-			$result = $mwseo_score->calculate( $post );
-			// Save the results
-			update_post_meta( $post->ID, '_seo_score', $result['score'] );
-			update_post_meta( $post->ID, '_seo_status', $result['status'] );
-			update_post_meta( $post->ID, '_seo_message', $result['message'] );
-			update_post_meta( $post->ID, '_seo_codes', isset( $result['errors']['codes'] ) ? $result['errors']['codes'] : [] );
+			$analyze_on_update = $this->get_option( 'analyze_on_update', 'none' );
+			// Determine analysis type: 'quick' or 'full'
+			$analysis_type = ( $analyze_on_update === 'quick' ) ? 'quick' : 'full';$this->calculate_seo_score( $post, $analysis_type );
 		}
 	}
 
 
 	// Decides whether or not the post is SEO-friendly or not.
-	function calculate_seo_score( $post ) {
+	function calculate_seo_score( $post, $analysis_type = 'full' ) {
 		global $mwseo_score;
 		if ( !$mwseo_score ) {
 			return [ 'status' => 'error', 'message' => 'Score module not initialized.' ];
 		}
-		
-		if ( get_post_meta( $post->ID, '_seo_status', true ) === 'skip' ) {
+
+		if ( get_post_meta( $post->ID, '_mwseo_status', true ) === 'skip' ) {
 			$this->log( "🚫 Post (#{$post->ID}) was skipped." );
 			return [ 'status' => 'skip', 'message' => 'Skipped.' ];
 		}
-		
-		$result = $mwseo_score->calculate( $post );
-		
-		// Save the results
-		update_post_meta( $post->ID, '_seo_score', $result['score'] );
-		update_post_meta( $post->ID, '_seo_status', $result['status'] );
-		update_post_meta( $post->ID, '_seo_message', $result['message'] );
-		update_post_meta( $post->ID, '_seo_codes', isset( $result['errors']['codes'] ) ? $result['errors']['codes'] : [] );
-		
-		return $result;
+
+		// Clear magic fix markers before re-analysis
+		$this->clear_magic_fix_markers( $post->ID );
+
+		// Calculate SEO score with analysis type ('quick' or 'full')
+		$result = $mwseo_score->calculate( $post, $analysis_type );
+
+		// Save results
+		update_post_meta( $post->ID, '_mwseo_analysis', $result );
+
+		// Also save denormalized meta for sorting/filtering
+		update_post_meta( $post->ID, '_mwseo_overall', $result['overall'] );
+		// Note: cq and tech are legacy pillar scores, removed in v3
+		update_post_meta( $post->ID, '_mwseo_updated', time() );
+
+		// Maintain backward compatibility with old meta keys
+		$status = $this->get_status_from_score( $result );
+		$message = $this->get_message_from_score( $result );
+		$codes = $this->get_codes_from_score( $result );
+
+		update_post_meta( $post->ID, '_mwseo_score', $result['overall'] );
+		update_post_meta( $post->ID, '_mwseo_status', $status );
+		update_post_meta( $post->ID, '_mwseo_message', $message );
+		update_post_meta( $post->ID, '_mwseo_codes', $codes );
+
+		return [
+			'score' => $result['overall'],
+			'status' => $status,
+			'message' => $message,
+			'errors' => [ 'codes' => $codes ],
+			'data' => $result
+		];
+	}
+
+	// Convert score results to legacy status
+	private function get_status_from_score( $result ) {
+		$overall = $result['overall'];
+
+		if ( $overall >= 70 ) return 'ok';
+		if ( $overall >= 40 ) return 'error'; // Could improve
+		return 'error'; // Needs attention
+	}
+
+	// Convert score results to legacy message
+	private function get_message_from_score( $result ) {
+		$overall = $result['overall'];
+
+		if ( $overall >= 70 ) {
+			$emoji = '🟢';
+			$label = __( 'Great', 'seo-engine' );
+		} elseif ( $overall >= 40 ) {
+			$emoji = '🟠';
+			$label = __( 'Could improve', 'seo-engine' );
+		} else {
+			$emoji = '🔴';
+			$label = __( 'Needs attention', 'seo-engine' );
+		}
+
+		$message = sprintf( '%s %s (%d%%)', $emoji, $label, $overall );
+
+		if ( !empty( $result['ai']['summary'] ) ) {
+			$message .= "\n" . sprintf( __( 'How AI reads this: "%s"', 'seo-engine' ), $result['ai']['summary'] );
+		}
+
+		return $message;
+	}
+
+	// Extract error codes from score tests
+	private function get_codes_from_score( $result ) {
+		$codes = [];
+
+		foreach ( $result['tests'] as $test_name => $score ) {
+			if ( $score === 'NA' ) continue;
+			if ( $score < 70 ) {
+				$codes[] = $test_name;
+			}
+		}
+
+		return $codes;
 	}
 
 	function get_all_posts_with_seo_score() {
@@ -342,13 +450,22 @@ class Meow_MWSEO_Core
 		$show_any_post_type  = false;
 		$show_unscored_posts = true;
 
-		$meta_query = $show_unscored_posts ? [] : [ 'key' => '_seo_score', 'compare' => 'EXISTS' ];
+		$meta_query = $show_unscored_posts ? [] : [ 'key' => '_mwseo_score', 'compare' => 'EXISTS' ];
 		$default_post_type = $this->get_option( 'default_post_type', 'post' );
 		$post_type = $show_any_post_type ? 'any' : $default_post_type;
 
+		// When 'any' is selected, use only the enabled post types from settings
+		if ( $post_type === 'any' ) {
+			$post_type = $this->get_option( 'select_post_types', ['post', 'page'] );
+		}
+
+		// PERFORMANCE FIX: Allow limiting posts for very large sites
+		// Default to 10000 max to prevent memory issues
+		$max_posts = apply_filters( 'seo_engine_max_chart_posts', 10000 );
+
 		$args = array(
 			'post_type' => $post_type,
-			'posts_per_page' => -1,
+			'posts_per_page' => $max_posts,
 			'meta_query' => array(
 				$meta_query,
 			),
@@ -356,11 +473,17 @@ class Meow_MWSEO_Core
 
 		$posts = get_posts( $args );
 
+		// PERFORMANCE FIX: Prime meta cache to avoid N+1 queries
+		if (!empty($posts)) {
+			$post_ids = wp_list_pluck($posts, 'ID');
+			update_meta_cache('post', $post_ids);
+		}
+
 		$posts_with_seo_score = array();
-		
+
 		foreach ( $posts as $post ) {
-			$seo_score = get_post_meta( $post->ID, '_seo_score', true );
-			$seo_status = get_post_meta( $post->ID, '_seo_status', true );
+			$seo_score = get_post_meta( $post->ID, '_mwseo_score', true );
+			$seo_status = get_post_meta( $post->ID, '_mwseo_status', true );
 
 
 			$posts_with_seo_score[] = array(
@@ -377,20 +500,20 @@ class Meow_MWSEO_Core
 
 	private function get_seo_category ( $score ) {
 
-		if ( $score >= 0 && $score <= 20 ) {
-			return 'Poor SEO';
+		if ( $score >= 0 && $score < 25 ) {
+			return 'Terrible';
 		}
-		else if ( $score >= 21 && $score <= 40 ) {
-			return 'Normal SEO';
+		else if ( $score >= 25 && $score < 50 ) {
+			return 'Poor';
 		}
-		else if ( $score >= 41 && $score <= 60 ) {
-			return 'Good SEO';
+		else if ( $score >= 50 && $score < 75 ) {
+			return 'Acceptable';
 		}
-		else if ( $score >= 61 && $score <= 80 ) {
-			return 'Great SEO';
+		else if ( $score >= 75 && $score < 90 ) {
+			return 'Great';
 		}
-		else if ( $score >= 81 && $score <= 100 ) {
-			return 'Excellent SEO';
+		else if ( $score >= 90 && $score <= 100 ) {
+			return 'Excellent';
 		}
 		else {
 			return 'Unknown';
@@ -401,10 +524,10 @@ class Meow_MWSEO_Core
 
 		$post_id = $post->ID;
 
-		$score = get_post_meta( $post_id, '_seo_score', true );
-		$status = get_post_meta( $post_id, '_seo_status', true );
-		$message = get_post_meta( $post_id, '_seo_message', true );
-		$codes = get_post_meta( $post_id, '_seo_codes', true );
+		$score = get_post_meta( $post_id, '_mwseo_score', true );
+		$status = get_post_meta( $post_id, '_mwseo_status', true );
+		$message = get_post_meta( $post_id, '_mwseo_message', true );
+		$codes = get_post_meta( $post_id, '_mwseo_codes', true );
 
 		if( !$status ) { $status = 'pending'; }
 		if( !$message ) { $message = 'Start an analysis to get a score.'; }
@@ -500,7 +623,7 @@ class Meow_MWSEO_Core
 		global $post;
 		$excerpt = $this->build_excerpt( $post );
 		$excerpt = trim( strip_tags( $excerpt ) );
-		echo '<meta name="description" content="' . esc_html( $excerpt ) . '" />';
+		echo '<meta class="mwseo-meta" name="description" content="' . esc_html( $excerpt ) . '" />';
 	}
 
 	function get_images_from_content( $content ) {
@@ -694,93 +817,97 @@ class Meow_MWSEO_Core
 	}
 
 
-	function magic_fix( $post, $errors, $update_post = false){
-		//For the error codes refer to this notion page : https://www.notion.so/meowarts/Error-codes-table-220cc0999fdd4e56943a6957de4be854
-		$magic_fixes = [];
-		$start_time = microtime( true );
-
-		global $mwai;
-		if (is_null( $mwai ) || !isset( $mwai ) ) {
-			$this->log( '⚠️ Missing AI Engine.');
-			return false;
+	/**
+	 * Generate AI solution for a specific issue - Backward compatibility wrapper
+	 *
+	 * @deprecated Use $core->pro->magic_fix->generate_solution() instead
+	 */
+	public function magic_fix_generate_solution( $post, $issue_type ) {
+		if ( $this->pro && $this->pro->magic_fix ) {
+			return $this->pro->magic_fix->generate_solution( $post, $issue_type );
 		}
+		$this->log( '⚠️ Magic Fix is not available. This is a premium feature.' );
+		return false;
+	}
 
-		$magic_fix_module = new Meow_MWSEO_Modules_MagicFix( $post, $this );
-		
-		$fix_to_ignore = $this->get_option( 'select_magic_fix' , [] );
-		$errors = array_diff( $errors, $fix_to_ignore );
+	/**
+	 * Apply a generated solution to a post - Backward compatibility wrapper
+	 *
+	 * @deprecated Use $core->pro->magic_fix->apply_solution() instead
+	 */
+	public function magic_fix_apply_solution( $post, $issue_type, $solution ) {
+		if ( $this->pro && $this->pro->magic_fix ) {
+			return $this->pro->magic_fix->apply_solution( $post, $issue_type, $solution );
+		}
+		$this->log( '⚠️ Magic Fix is not available. This is a premium feature.' );
+		return false;
+	}
 
-		foreach ( $errors as $error_key => $error) {
-			$error_switch = $update_post ? $error_key : $error;
-			$elapsed_time = microtime( true ) - $start_time;
-			$this->log( '🔍 Elapsed time : ' . sprintf('%0.2f', $elapsed_time) . ' seconds. Now processing : ' . $error_switch );
-			switch ( $error_switch ) {
-				case 'title_missing':
-					$magic_fixes['title_missing'] =  $update_post ? $magic_fix_module->magic_fix_title_missing_post_update( $error[ 'value' ] ) : $magic_fix_module->magic_fix_title_missing(  );
-					break;
-				case 'title_not_unique':
-					$magic_fixes['title_not_unique'] =  $update_post ? $magic_fix_module->magic_fix_title_missing_post_update( $error[ 'value' ] ) : $magic_fix_module->magic_fix_title_missing(  );
-					break;
-				case 'title_seo_length':
-					$magic_fixes['title_seo_length'] =  $update_post ? $magic_fix_module->magic_fix_title_seo_post_update( $error[ 'value' ] ) : $magic_fix_module->magic_fix_title_seo(  );
-					break;
-				case 'excerpt_missing':
-					$magic_fixes['excerpt_missing'] =  $update_post ? $magic_fix_module->magic_fix_excerpt_missing_post_update( $error[ 'value' ] ) : $magic_fix_module->magic_fix_excerpt_missing(  );
-					break;
-				case 'excerpt_seo_length':
-					$magic_fixes['excerpt_seo_length'] =  $update_post ? $magic_fix_module->magic_fix_excerpt_seo_length_post_update( $error[ 'value' ] ) : $magic_fix_module->magic_fix_excerpt_seo_length(  );
-					break;
-				case 'slug_length':
-				case 'slug_words':
-					$magic_fixes['slug_words'] = $update_post ? $magic_fix_module->magic_fix_slug_length_post_update( $error[ 'value' ] ) : $magic_fix_module->magic_fix_slug_length(  );
-					break;
-				case 'images_missing_alt_text':
+	/**
+	 * Mark an issue as fixed by Magic Fix - Backward compatibility wrapper
+	 *
+	 * @deprecated Use $core->pro->magic_fix->mark_as_fixed() instead
+	 */
+	public function mark_issue_as_magic_fixed( $post_id, $issue_type ) {
+		if ( $this->pro && $this->pro->magic_fix ) {
+			return $this->pro->magic_fix->mark_as_fixed( $post_id, $issue_type );
+		}
+	}
 
-					if( !$update_post ) {
-						$images = $this->check_images_alt_text( $post );
-						$this->log( '🔍 Images missing alt text : ' . count( $images ) );
-					}
-					
-					$magic_fixes['images_missing_alt_text'] =  $update_post ?
-						$magic_fix_module->magic_fix_images_missing_alt_text_post_update( $error[ 'value' ] )
-					:
-						$magic_fix_module->magic_fix_images_missing_alt_text( $images );
+	/**
+	 * Check if an issue has been marked as fixed - Backward compatibility wrapper
+	 *
+	 * @deprecated Use $core->pro->magic_fix->is_fixed() instead
+	 */
+	public function is_issue_magic_fixed( $post_id, $issue_type ) {
+		if ( $this->pro && $this->pro->magic_fix ) {
+			return $this->pro->magic_fix->is_fixed( $post_id, $issue_type );
+		}
+		return false;
+	}
 
-					break;
-				case 'links_missing_external':
+	/**
+	 * Clear all magic fix markers for a post - Backward compatibility wrapper
+	 *
+	 * @deprecated Use $core->pro->magic_fix->clear_markers() instead
+	 */
+	public function clear_magic_fix_markers( $post_id ) {
+		if ( $this->pro && $this->pro->magic_fix ) {
+			return $this->pro->magic_fix->clear_markers( $post_id );
+		}
+	}
 
-					$res = $magic_fix_module->magic_fix_links_missing( 'external' );
+	/**
+	 * Migrate old meta keys to new mwseo prefixed keys
+	 * This migration runs once per post when the post is accessed/analyzed
+	 */
+	public function migrate_post_meta_keys( $post_id ) {
+		// Mapping of old keys to new keys
+		$meta_keys_map = [
+			'_seo_engine_data' => '_mwseo_analysis',
+			'_seo_engine_ignored_tests' => '_mwseo_ignored_tests',
+			'_seo_engine_overall' => '_mwseo_overall',
+			'_seo_engine_updated' => '_mwseo_updated',
+			'_seo_engine_ai_keywords' => '_mwseo_keywords',
+			'_seo_title' => '_mwseo_title',
+			'_seo_excerpt' => '_mwseo_excerpt',
+			'_seo_robots' => '_mwseo_robots',
+			'_seo_canonical' => '_mwseo_canonical',
+			'_seo_status' => '_mwseo_status',
+			'_seo_message' => '_mwseo_message',
+			'_seo_score' => '_mwseo_score',
+			'_seo_codes' => '_mwseo_codes',
+		];
 
-					if ( !isset( $magic_fixes['links_missing'] ) ){
-						$magic_fixes['links_missing'] = $res;
-					} else {
-						$magic_fixes['links_missing']['value'] .= $res['value'];
-					}
-
-					
-					break;
-				case 'links_missing_internal':
-					$res = $magic_fix_module->magic_fix_links_missing( 'internal' );
-
-					if ( !isset( $magic_fixes['links_missing'] ) ){
-						$magic_fixes['links_missing'] = $res;
-					} else {
-						$magic_fixes['links_missing']['value'] .= $res['value'];
-					}
-
-					break;
-				case 'links_missing':
-					if ( !$update_post ) break;
-
-					$magic_fixes['links_missing'] = $magic_fix_module->magic_fix_links_missing_update_post( $error[ 'value' ] );
-					
-					break;
-				default:
-					break;
+		foreach ( $meta_keys_map as $old_key => $new_key ) {
+			$value = get_post_meta( $post_id, $old_key, true );
+			if ( $value !== '' && $value !== false ) {
+				// Copy to new key
+				update_post_meta( $post_id, $new_key, $value );
+				// Delete old key
+				delete_post_meta( $post_id, $old_key );
 			}
 		}
-
-		return $magic_fixes;
 	}
 
 	/**
@@ -804,8 +931,9 @@ class Meow_MWSEO_Core
 	}
 
 	function sanitized_options(){
+		// This is a READ-ONLY method - it computes derived values but NEVER writes to the database
 		$options = $this->get_all_options();
-		
+
 		$options['post_types'] = $this->make_post_type_list( $this->get_post_types() );
 
 		if ( $options['language'] == 'auto' || empty( $options['language'] ) ) {
@@ -816,7 +944,10 @@ class Meow_MWSEO_Core
 			$options['readability_treshold'] = 50;
 		}
 
-		// AI Engine
+		// Always force analyze_buffer to 1 - analyzing multiple posts at once causes performance issues
+		$options['analyze_buffer'] = 1;
+
+		// AI Engine - check status but DON'T modify stored options
 		global $mwai;
 
 		if( is_null( $mwai ) || !isset( $mwai ) ) {
@@ -835,9 +966,11 @@ class Meow_MWSEO_Core
 			}
 		}
 
-		// AI Features
+		// AI Features - Only disable in the returned array for UI purposes
+		// DO NOT modify the stored user preferences
 		if ( !$options['ai_engine_status'] ) {
-			// Disable all AI related features
+			// Show features as disabled in UI without changing user's saved preferences
+			// These are temporary overrides for the current request only
 			$options['ai_magic_fix'] = false;
 			$options['ai_auto_correct'] = false;
 			$options['ai_magic_wand'] = false;
@@ -846,19 +979,11 @@ class Meow_MWSEO_Core
 			$options['woocommerce_assistant'] = false;
 		}
 
-		// SE Ranking
-
-
-		// Sitemap
-		if ( $options['disable_wp_sitemap'] ) {
-
-		}
-
-		$options = $this->update_options( $options );
-
+		// Return sanitized options WITHOUT persisting to database
 		return $options;
 	}
 
+	// TODO: Review which options are still in use after meta key refactoring - many may be obsolete
 	function list_options() {
 		return array(
 			// Module Toggles
@@ -866,17 +991,19 @@ class Meow_MWSEO_Core
 			'technical_seo' => true,
 
 			'speed_and_vitals' => false,
-			'analytics' => false,
+			'analytics' => true,
 			
 			// Content SEO
 			'default_post_type' => 'post',
 			'posts_limit' => 10,
+			'posts_sort' => array( 'accessor' => 'score', 'by' => 'asc' ),
+			'posts_filter' => 'all',
 			'post_types' => $this->make_post_type_list( $this->get_post_types() ),
-			'select_post_types' => ['post'],
+			'select_post_types' => ['post', 'page'],
 			'readability_treshold' => 50,
 			'language' => $this->get_language_name( get_locale() ) ?? 'English',
-			'analyze_on_update' => false,
-			'analyze_buffer' => 10,
+			'analyze_on_update' => 'none',
+			'analyze_buffer' => 1,
 			'analyze_buffer_interval' => 0,
 			
 			// Technical SEO
@@ -915,6 +1042,10 @@ class Meow_MWSEO_Core
 			// Analytics Configuration
 			'analytics_method' => 'none', // 'none', 'private', 'google'
 			
+			// Analytics Options
+			'bots_track' => true,
+			'bots_instructions' => false,
+			'bots_instructions_content' => '',
 			// Private Analytics
 			'general_analytics' => false,
 			'analytics_track_logged_users' => false,
@@ -941,12 +1072,77 @@ class Meow_MWSEO_Core
 			'ai_magic_wand' => false,
 			'ai_web_scraping' => false,
 			'ai_keywords' => false,
+			'ai_semantic_analysis' => true, // Enable AI semantic analysis (requires AI Engine)
+			'full_analysis' => true, // Enable Full Analysis with Intelligence checks
+			'daily_insights' => true,
 			'woocommerce_assistant' => false,
 			'select_magic_fix' => [
 				'readability_score',
 			],
-			
-			// Score Factors
+
+			// Scoring Preferences
+			'pillar_weight_cq' => 50, // Content Quality weight (0-100)
+			'pillar_weight_tech' => 50, // Technical weight (0-100)
+			'quality_safeguards_enabled' => true,
+			'use_seo_metadata' => true,
+			'show_ai_summary' => true,
+			'row_density' => 'cozy', // compact | cozy
+
+			// Content Quality - Basic
+			'use_excerpt_as_meta' => true,
+			'aim_easy_reading' => true,
+			'encourage_image_alt' => true,
+			'ai_detect_intent' => true,
+			'short_strong_mode' => true,
+
+			// Content Quality - Advanced
+			'readability_flesch_min' => 50,
+			'readability_flesch_max' => 70,
+			'readability_grade_min' => 7,
+			'readability_grade_max' => 10,
+			'short_strong_sensitivity' => 'normal', // normal | strict | off
+			'show_author_visible' => true,
+			'link_to_author_page' => true,
+			'intent_schema_coherence' => true,
+
+			// Technical - Basic
+			'require_unique_title' => true,
+			'encourage_short_slug' => true,
+			'encourage_internal_links' => true,
+			'check_internal_links' => true,
+			'check_missing_alt_text' => true,
+			'check_orphaned_content' => true,
+			'auto_schema_enabled' => true,
+
+			// Length Guidelines
+			'title_length_min' => 30,
+			'title_length_max' => 60,
+			'excerpt_length_min' => 80,
+			'excerpt_length_max' => 160,
+			'content_length_min' => 300,
+			'content_length_max' => 1600,
+
+			// Technical - Advanced
+			'slug_length_max' => 60,
+			'slug_words_min' => 2,
+			'slug_words_max' => 6,
+			'smart_internal_links' => true,
+			'check_external_links' => false,
+			'schema_by_post_type' => [
+				'post' => 'Article',
+				'page' => 'WebPage',
+				'product' => 'Product',
+			],
+
+			// Content Comfort Zones
+			'comfort_zone_quick_min' => 150,
+			'comfort_zone_quick_max' => 500,
+			'comfort_zone_guide_min' => 700,
+			'comfort_zone_guide_max' => 1600,
+			'comfort_zone_product_min' => 300,
+			'comfort_zone_product_max' => 900,
+
+			// Legacy Score Factors (kept for compatibility)
 			'score_check_title_exists' => true,
 			'score_check_title_unique' => true,
 			'score_check_title_length' => true,
@@ -1071,7 +1267,63 @@ class Meow_MWSEO_Core
 			throw new Exception( 'AI Engine is not available.' );
 		}
 
-		$prompt  = "Here is the product: {PRODUCT}\n\nBased on the product, write a description of this product (between 120 and 240 words), a short description (between 20-49 words), a SEO-friendly title, and tags (separated by commas). Write it in {LANGUAGE}.";
+		$product_id = $params['post_id'];
+
+		// We use the autosave that we force from the editor using AJAX so we get the actual content the user is editing
+		$last_product_autosave = wp_get_post_autosave( $product_id );
+		$product = $last_product_autosave ? $last_product_autosave : get_post( $product_id );
+
+		$product_data = [
+			'id' => $product_id,
+			'title' => $product->post_title,
+			'description' => $product->post_content,
+			'short_description' => $product->post_excerpt,
+			'categories' => wp_get_post_terms( $product_id, 'product_cat', array( 'fields' => 'names' ) ),
+			'tags' => wp_get_post_terms( $product_id, 'product_tag', array( 'fields' => 'names' ) ),
+			'attributes' => wc_get_product( $product_id )->get_attributes(),
+			'price' => wc_get_product( $product_id )->get_price(),
+		];
+
+
+		// Use Vision if enabled
+		$use_vision = $params['vision'];
+		$vision_result = null;
+		if ( $use_vision ) {
+			$product_image = get_post_meta( $product_id, '_thumbnail_id', true );
+			if ( $product_image ) {
+
+				$prompt = "Describe the main elements in the image, the colors, the style, the context, and any text that is visible. Write it in {LANGUAGE}.";
+
+				$intermediate = image_get_intermediate_size( $product_id, 'medium' );
+				$path = $intermediate 
+					? path_join( dirname( get_attached_file( $product_id ) ), $intermediate['file'] ) 
+					: get_attached_file( $product_id );
+				$url = $intermediate 
+					? wp_get_attachment_image_url( $product_id, 'medium' ) 
+					: wp_get_attachment_url( $product_id );
+
+
+				$binary =  !empty( $path ) && file_exists( $path ) ? file_get_contents( $path ) : null;
+
+				if ( !$binary ) {
+					$vision_result = $mwai->simpleVisionQuery( $prompt, $url, $path, [ 'scope' => 'seo' ] );
+				} else {
+					$vision_result = $mwai->simpleVisionQuery( $prompt, null, $binary, [ 'scope' => 'seo' ] );
+				}
+			}
+		}
+		
+
+		$prompt  = "Based on the product, write a description of this product (between 120 and 240 words), a short description (between 20-49 words), a SEO-friendly title, and tags (separated by commas). SEO and sales focused. Write it in {LANGUAGE}.";
+
+		$prompt .= "\n\nHere are the user provided details about the product: {PRODUCT}.";
+
+		$prompt .= "\n\nHere are the details extracted from the product data: " . json_encode( $product_data );
+
+		if ( $vision_result ) {
+			$prompt .= "\n\nAlso, here is what is seen in the product image: " . $vision_result;
+		}
+
 		$prompt  = apply_filters( 'mwseo_woo_product_prompt', $prompt );
 		$prompt .= "Use this keys: description, short_description, seo_title, tags.";
 
@@ -1089,6 +1341,7 @@ class Meow_MWSEO_Core
 
 	function import_yoast() {
 		// For all the selected post types, get the _yoast_wpseo_title & _yoast_wpseo_metadesc	and import them to _kiss_seo_title & _kiss_seo_excerpt
+		// TODO: Migrate to _mwseo_title & _mwseo_excerpt
 		$post_types = $this->get_option( 'select_post_types', array( 'post ') );
 		$posts = get_posts( array(
 			'post_type' => $post_types,
@@ -1167,8 +1420,57 @@ class Meow_MWSEO_Core
 		return true;
 	}
 
+	/**
+	 * Calculate effective display width of text for SERP.
+	 * CJK characters (Chinese, Japanese, Korean) are roughly twice as wide as Latin characters
+	 * in Google's search results, so they count as 2 units. This approximates the pixel-based
+	 * measurement that Google actually uses for title/description truncation.
+	 *
+	 * @param string $text The text to measure
+	 * @return int Display width in units (Latin chars = 1, CJK chars = 2)
+	 */
+	function get_display_width( $text ) {
+		if ( empty( $text ) ) {
+			return 0;
+		}
+		$width = 0;
+		// Split into individual characters (UTF-8 safe)
+		$chars = preg_split( '//u', $text, -1, PREG_SPLIT_NO_EMPTY );
+		foreach ( $chars as $char ) {
+			// CJK Unified Ideographs, Extension A, Hiragana, Katakana, Hangul Syllables
+			if ( preg_match( '/[\x{4E00}-\x{9FFF}\x{3400}-\x{4DBF}\x{3040}-\x{309F}\x{30A0}-\x{30FF}\x{AC00}-\x{D7AF}]/u', $char ) ) {
+				$width += 2;
+			} else {
+				$width += 1;
+			}
+		}
+		return $width;
+	}
+
+	/**
+	 * Check if text is predominantly CJK characters.
+	 *
+	 * @param string $text The text to check
+	 * @param float $threshold Ratio threshold (default 0.5 = 50% CJK)
+	 * @return bool True if text meets or exceeds CJK threshold
+	 */
+	function is_mostly_cjk( $text, $threshold = 0.5 ) {
+		if ( empty( $text ) ) {
+			return false;
+		}
+		$text_length = mb_strlen( $text, 'UTF-8' );
+		if ( $text_length === 0 ) {
+			return false;
+		}
+		// Count CJK characters
+		preg_match_all( '/[\x{4E00}-\x{9FFF}\x{3400}-\x{4DBF}\x{3040}-\x{309F}\x{30A0}-\x{30FF}\x{AC00}-\x{D7AF}]/u', $text, $matches );
+		$cjk_count = count( $matches[0] );
+		return ( $cjk_count / $text_length ) >= $threshold;
+	}
+
 	function import_rank_math() {
 		// For all the selected post types, get the _rank_math_title & _rank_math_description and import them to _kiss_seo_title & _kiss_seo_excerpt
+		// TODO: Migrate to _mwseo_title & _mwseo_excerpt
 		$post_types = $this->get_option( 'select_post_types', array( 'post ') );
 		$posts = get_posts( array(
 			'post_type' => $post_types,
@@ -1375,6 +1677,78 @@ class Meow_MWSEO_Core
 
 	#endregion
 
+	#region LLMs.txt
+
+	function get_llms_txt() {
+		$llmsTxt = '';
+		$llms_path = ABSPATH . 'llms.txt';
+		$source = 'none';
+		
+		if ( file_exists( $llms_path ) ) {
+			$llmsTxt = file_get_contents( $llms_path );
+			$source = 'file';
+		} else {
+			$llmsTxt = $this->get_template_llms();
+			$source = 'template';
+		}
+
+		return [
+			'content' => $llmsTxt,
+			'source' => $source,
+			'path' => $llms_path,
+		];
+	}
+
+	function get_template_llms() {
+
+		$site_url = get_site_url();
+		$site_name = get_bloginfo( 'name' );
+
+		$template = "
+# {SITE_NAME}
+
+> Short summary, e.g. description or key benefits of the site.
+
+**Key Features**:
+- **Feature 1**: Brief description of feature 1.
+- **Feature 2**: Brief description of feature 2.
+- **Feature 3**: Brief description of feature 3.
+
+## Section Title 1
+* [Page Title 1]({SITE_URL}/url/for/page1): Brief description of the page content.
+* [Page Title 2]({SITE_URL}/url/for/page2): Brief description of the page content.
+* [Page Title 3]({SITE_URL}/url/for/page3): Brief description of the page content.
+
+## Section Title 2
+* [Link Description A]({SITE_URL}/url/a): Description of content A.
+* [Link Description B]({SITE_URL}/url/b): Description of content B.
+
+## Optional: Lower-priority Resources
+* [Optional Link]({SITE_URL}/optional/url): This content can be skipped if needed.
+";
+
+		$template = str_replace( '{SITE_URL}', $site_url, $template );
+		$template = str_replace( '{SITE_NAME}', $site_name, $template );
+
+		return $template;
+
+	}
+
+	function set_llms_txt( $content ) {
+		$llms_path = ABSPATH . 'llms.txt';
+
+		$site_url = get_site_url();
+		$site_name = get_bloginfo( 'name' );
+
+		$content = str_replace( '{SITE_URL}', $site_url, $content );
+		$content = str_replace( '{SITE_NAME}', $site_name, $content );
+		
+		$result = file_put_contents( $llms_path, $content );
+		return $result !== false;
+	}
+
+	#endregion
+
 	#region Performance Insights
 
 	function get_speed_and_vitals( $post_id ) {
@@ -1410,6 +1784,7 @@ class Meow_MWSEO_Core
 		}
 	}
 
+	// TODO [2025]: Refactor to unified analytics provider interface
 	function get_analytics_data( $args = array() ) {
 		if ( !isset( $this->analytics_module ) ) {
 			return array();
@@ -1418,6 +1793,7 @@ class Meow_MWSEO_Core
 		return $this->analytics_module->get_analytics_data( $args );
 	}
 
+	// TODO [2025]: Refactor to unified analytics provider interface
 	function get_analytics_summary( $start_date = null, $end_date = null ) {
 		if ( !isset( $this->analytics_module ) ) {
 			return array();
@@ -1426,12 +1802,82 @@ class Meow_MWSEO_Core
 		return $this->analytics_module->get_analytics_summary( $start_date, $end_date );
 	}
 
+	// TODO [2025]: Refactor to unified analytics provider interface
 	function get_top_posts( $args = array() ) {
 		if ( !isset( $this->analytics_module ) ) {
 			return array();
 		}
 
 		return $this->analytics_module->get_top_posts( $args );
+	}
+
+	function get_ai_agents_summary( $start_date = null, $end_date = null ) {
+		if ( !isset( $this->analytics_module ) ) {
+			return array();
+		}
+
+		return $this->analytics_module->get_ai_agents_summary( $start_date, $end_date );
+	}
+
+	function get_ai_agent_details( $bot_name, $start_date = null, $end_date = null ) {
+		if ( !isset( $this->analytics_module ) ) {
+			return array();
+		}
+
+		return $this->analytics_module->get_ai_agent_details( $bot_name, $start_date, $end_date );
+	}
+
+	function get_ai_agents_by_post( $post_id, $days = 30 ) {
+		if ( !isset( $this->analytics_module ) ) {
+			return array(
+				'openai' => 0,
+				'anthropic' => 0,
+				'google' => 0,
+				'others' => 0
+			);
+		}
+
+		return $this->analytics_module->get_ai_agents_by_post( $post_id, $days );
+	}
+
+	function query_bot_traffic( $args = array() ) {
+		if ( !isset( $this->analytics_module ) ) {
+			return array();
+		}
+
+		return $this->analytics_module->query_bot_traffic( $args );
+	}
+
+	function rank_posts_for_bots( $args = array() ) {
+		if ( !isset( $this->analytics_module ) ) {
+			return array();
+		}
+
+		return $this->analytics_module->rank_posts_for_bots( $args );
+	}
+
+	function get_bot_profile( $bot_name, $start_date = null, $end_date = null ) {
+		if ( !isset( $this->analytics_module ) ) {
+			return array();
+		}
+
+		return $this->analytics_module->get_bot_profile( $bot_name, $start_date, $end_date );
+	}
+
+	function compare_bot_periods( $args = array() ) {
+		if ( !isset( $this->analytics_module ) ) {
+			return array();
+		}
+
+		return $this->analytics_module->compare_bot_periods( $args );
+	}
+
+	function get_bot_mix( $args = array() ) {
+		if ( !isset( $this->analytics_module ) ) {
+			return array();
+		}
+
+		return $this->analytics_module->get_bot_mix( $args );
 	}
 
 	#endregion
@@ -1497,6 +1943,7 @@ class Meow_MWSEO_Core
 		return $this->googleanalytics_module->get_redirect_url();
 	}
 
+	// TODO [2025]: Refactor to unified analytics provider interface
 	function get_google_analytics_data( $args = array() ) {
 		if ( !isset( $this->googleanalytics_module ) ) {
 			return array();
@@ -1505,6 +1952,15 @@ class Meow_MWSEO_Core
 		return $this->googleanalytics_module->get_analytics_data( $args );
 	}
 
+	function get_post_analytics( $post_id, $page_path, $start_date = null, $end_date = null ) {
+		if ( !isset( $this->analytics_module ) ) {
+			return array();
+		}
+
+		return $this->analytics_module->get_post_analytics( $post_id, $page_path, $start_date, $end_date );
+	}
+
+	// TODO [2025]: Refactor to unified analytics provider interface
 	function get_google_analytics_summary( $start_date = null, $end_date = null ) {
 		if ( !isset( $this->googleanalytics_module ) ) {
 			return array();
@@ -1513,6 +1969,15 @@ class Meow_MWSEO_Core
 		return $this->googleanalytics_module->get_analytics_summary( $start_date, $end_date );
 	}
 
+	function get_google_analytics_post_analytics( $page_path, $start_date = null, $end_date = null ) {
+		if ( !isset( $this->googleanalytics_module ) ) {
+			return array();
+		}
+
+		return $this->googleanalytics_module->get_post_analytics( $page_path, $start_date, $end_date );
+	}
+
+	// TODO [2025]: Refactor to unified analytics provider interface
 	function get_google_analytics_top_posts( $args = array() ) {
 		if ( !isset( $this->googleanalytics_module ) ) {
 			return array();
@@ -1521,12 +1986,50 @@ class Meow_MWSEO_Core
 		return $this->googleanalytics_module->get_top_posts( $args );
 	}
 
+	// TODO [2025]: Refactor to unified analytics provider interface
 	function get_google_analytics_realtime_data() {
 		if ( !isset( $this->googleanalytics_module ) ) {
 			return array();
 		}
 
 		return $this->googleanalytics_module->get_realtime_data();
+	}
+
+	// Plausible Analytics
+
+	// TODO [2025]: Refactor to unified analytics provider interface
+	function get_plausible_analytics_data( $args = array() ) {
+		if ( !isset( $this->pro->plausible_analytics ) ) {
+			return array();
+		}
+
+		return $this->pro->plausible_analytics->get_data( $args );
+	}
+
+	// TODO [2025]: Refactor to unified analytics provider interface
+	function get_plausible_analytics_summary( $start_date = null, $end_date = null ) {
+		if ( !isset( $this->pro->plausible_analytics ) ) {
+			return array();
+		}
+
+		return $this->pro->plausible_analytics->get_summary( $start_date, $end_date );
+	}
+
+	function get_plausible_analytics_post_analytics( $page_path, $start_date = null, $end_date = null ) {
+		if ( !isset( $this->pro->plausible_analytics ) ) {
+			return array();
+		}
+
+		return $this->pro->plausible_analytics->get_post_analytics( $page_path, $start_date, $end_date );
+	}
+
+	// TODO [2025]: Refactor to unified analytics provider interface
+	function get_plausible_analytics_top_posts( $start_date = null, $end_date = null, $limit = 10 ) {
+		if ( !isset( $this->pro->plausible_analytics ) ) {
+			return array();
+		}
+
+		return $this->pro->plausible_analytics->get_top_posts( $start_date, $end_date, $limit );
 	}
 
 	#endregion

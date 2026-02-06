@@ -2,8 +2,8 @@
 /*
 Plugin Name: SEO Engine
 Plugin URI: https://meowapps.com
-Description: SEO Engine is built for the AI-driven future. Create quality content, and we handle the SEO. Simple, neat, and hassle-free!
-Version: 0.4.2
+Description: Made it through the SEO plugin wasteland? You've earned a coffee ☺️ Quietly powerful AI SEO that actually works. No bloat, just results. Enjoy! 💕
+Version: 0.5.8
 Author: Jordy Meow
 Author URI: https://jordymeow.com
 Text Domain: seo-engine
@@ -13,7 +13,7 @@ http://www.opensource.org/licenses/mit-license.php
 http://www.gnu.org/licenses/gpl.html
 */
 
-define( 'MWSEO_VERSION', '0.4.2' );
+define( 'MWSEO_VERSION', '0.5.8' );
 define( 'MWSEO_PREFIX', 'mwseo' );
 define( 'MWSEO_DOMAIN', 'seo-engine' );
 define( 'MWSEO_ENTRY', __FILE__ );

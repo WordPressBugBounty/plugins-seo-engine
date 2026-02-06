@@ -21,7 +21,6 @@ class Meow_MWSEO_Modules_Insights
   public function init()
   {
     if ( !$this->check_api_settings() ) {
-      $this->core->log( '⚠️ Google Insights not initialized.' );
       return;
     }
 
@@ -33,7 +32,6 @@ class Meow_MWSEO_Modules_Insights
     $this->key = $this->core->get_option( 'google_api_key', '' );
 
     if ( empty( $this->key ) ) {
-      $this->core->log( '⚠️ Google API Key is missing.' );
       return false;
     }
 
@@ -77,6 +75,7 @@ class Meow_MWSEO_Modules_Insights
 
     $args = array(
       'url' => $url,
+      //'url' => 'https://www.meowapps.com/', //! For testing purposes
       'key' => $this->key,
     );
 
@@ -85,6 +84,9 @@ class Meow_MWSEO_Modules_Insights
 
     $response = wp_remote_get( $this->url . '?' . $fullQueryString, array(
         'timeout' => $this->timeout,
+        'headers' => array(
+            'referer' => home_url(),
+        ),
     ) );
 
     if ( is_wp_error( $response ) ) {

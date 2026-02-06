@@ -2,8 +2,17 @@
 
 class Meow_MWSEO_Modules_Suggestions
 {
-    public static function prompt($post, $field, $customContent = null, $max_tokens = 500, $meta_key_seo_title = '_kiss_seo_title', $meta_key_seo_excerpt = '_kiss_seo_excerpt' ){
-		$core = new Meow_MWSEO_Core();
+    // TODO: Migrate $meta_key_seo_title to '_mwseo_title' and $meta_key_seo_excerpt to '_mwseo_excerpt'
+    public static function prompt($post, $field, $customContent = null, $max_tokens = 500, $meta_key_seo_title = '_kiss_seo_title', $meta_key_seo_excerpt = '_kiss_seo_excerpt', $core = null ){
+		// Get the global core instance if not provided
+		if ( is_null( $core ) ) {
+			global $mwseo_core;
+			$core = $mwseo_core;
+			// Fallback if global is not set (shouldn't happen in normal operation)
+			if ( is_null( $core ) ) {
+				throw new Exception( 'SEO Engine Core is not initialized.' );
+			}
+		}
 		global $mwai;
 
 		if (is_null( $mwai ) || !isset( $mwai ) ) {
@@ -14,7 +23,7 @@ class Meow_MWSEO_Modules_Suggestions
 		$language    = $core->get_option( 'language', 'English' );
 		$ai_keywords = $core->get_option( 'ai_keywords', false );
 
-		$originalContent = $customContent?? Meow_MWSEO_Modules_Suggestions::get_post_sample_context( $post );
+		$originalContent = $customContent?? Meow_MWSEO_Modules_Suggestions::get_post_sample_context( $post, $core );
 		$prompt = "";
 		$max_tokens = $max_tokens;
 		$expected_size = 0;
@@ -31,8 +40,8 @@ class Meow_MWSEO_Modules_Suggestions
 				break;
 			case 'excerpt_missing':
 			case 'excerpt':
-				$prompt = sprintf( "Given the original excerpt: \"%s\" and a sample from the post content : \"%s\", write a concise (2 sentences), engaging and SEO-friendly excerpt.", $post->post_excerpt, $originalContent );
-				$expected_size = 200;
+				$prompt = sprintf( "Given the original excerpt: \"%s\" and a sample from the post content : \"%s\", write a concise, engaging and SEO-friendly excerpt. Ideally between 100 and 140 characters. It should be absolutely CONCISE and LESS than 160 characters.", $post->post_excerpt, $originalContent );
+				$expected_size = 160;
 				break;
 			case 'title_seo_length':
 			case 'seo_title':
@@ -61,7 +70,7 @@ class Meow_MWSEO_Modules_Suggestions
 				// Get keywords from the post.
 				$keywords = [];
 				if ( $ai_keywords ) {
-					$keywords = get_post_meta( $post->ID, '_seo_engine_ai_keywords', true );
+					$keywords = get_post_meta( $post->ID, '_mwseo_keywords', true );
 				} 
 
 				if ( empty( $keywords ) || !is_array( $keywords ) ) {
@@ -108,7 +117,7 @@ class Meow_MWSEO_Modules_Suggestions
 				break;
 	
 			case 'links_missing_external':
-				$prompt = sprintf( "Given the original title: \"%s\" and a sample from the post content : \"%s\", create a new, SEO-friendly paragraph \"You might be interested in\" that will add a few external embedded links to wikipedia articles that are related. The format should be natural, very human, something along \"Speaking of [keyword], you might be interested in  <a href=\"[https_link_to_article]\" target=\"_blank\">[wikipedia_article]</a>\". It should be natural, so it should not start with \"You might be interested in\". The wikipedia articles should be related to the post content, and the links should be embedded in the text and it should feel like a natural part of the current paragraph.", $post->post_title, $originalContent );
+				$prompt = sprintf( "Given the original title: \"%s\" and the post content: \"%s\", identify 2-3 existing text phrases from the content that would benefit from external Wikipedia links. For each phrase, find a relevant Wikipedia article. Return ONLY the HTML with the linked text using this format: <a href=\"[wikipedia_url]\" target=\"_blank\">[exact_phrase_from_content]</a> (one per line). The phrases MUST exist in the original content exactly as written. Choose phrases that are concepts, topics, or terms that readers would want to learn more about.", $post->post_title, $originalContent );
 				break;
 			
 				//DEFAULT
@@ -118,7 +127,7 @@ class Meow_MWSEO_Modules_Suggestions
 		}
 
 		if ( $ai_keywords ) {
-			$keywords = get_post_meta( $post->ID, '_seo_engine_ai_keywords', true );
+			$keywords = get_post_meta( $post->ID, '_mwseo_keywords', true );
 			if ( !empty( $keywords ) && is_array( $keywords ) ) {
 				$prompt = sprintf( '%s. The user wants this keywords to be what guides your suggestion : %s.', $prompt, implode(', ', $keywords) );
 			}
@@ -126,8 +135,13 @@ class Meow_MWSEO_Modules_Suggestions
 
 		$prompt = sprintf( '<instructions>Reply only with the asked content, no other text or explanations, nothing else. Your reply should be in %s.</instructions> <prompt>%s</prompt>', $language, $prompt );
 
-		$ai_suggestion = $mwai->simpleTextQuery( $prompt, [ 'scope' => 'seo-engine'] );
-		$ai_suggestion = Meow_MWSEO_Modules_Suggestions::verify_ai_suggestion( $ai_suggestion, $expected_size, $language );
+		try {
+			$ai_suggestion = $mwai->simpleTextQuery( $prompt, [ 'scope' => 'seo' ] );
+			$ai_suggestion = Meow_MWSEO_Modules_Suggestions::verify_ai_suggestion( $ai_suggestion, $expected_size, $language, $core );
+		} catch ( Exception $e ) {
+			$core->log( "⚠️ AI Engine Error: " . $e->getMessage() );
+			throw new Exception( "AI Engine failed to generate suggestion. Please check your AI Engine configuration. Error: " . $e->getMessage() );
+		}
 		
 
 		//sanitize ai suggestion if needed
@@ -140,8 +154,11 @@ class Meow_MWSEO_Modules_Suggestions
 			
 			case 'links_missing_internal':
 			case 'links_missing_external':
-				// Convert to block editor format.
-				$ai_suggestion = sprintf( "<!-- wp:paragraph -->\n<p>%s</p>\n<!-- /wp:paragraph -->", $ai_suggestion );
+				// For internal links, convert to block editor format (appended as new paragraph).
+				// For external links, keep raw HTML (used for search/replace).
+				if ( $field === 'links_missing_internal' ) {
+					$ai_suggestion = sprintf( "<!-- wp:paragraph -->\n<p>%s</p>\n<!-- /wp:paragraph -->", $ai_suggestion );
+				}
 				break;
 			case 'excerpt_seo_length':
 			case 'seo_excerpt':
@@ -155,8 +172,12 @@ class Meow_MWSEO_Modules_Suggestions
 		return $ai_suggestion;
 	}
 
-	public static function verify_ai_suggestion( $ai_suggestion, $expected_size, $language ) {
-		$core = new Meow_MWSEO_Core();
+	public static function verify_ai_suggestion( $ai_suggestion, $expected_size, $language, $core = null ) {
+		// Get the global core instance if not provided
+		if ( is_null( $core ) ) {
+			global $mwseo_core;
+			$core = $mwseo_core;
+		}
 		$is_auto_correct_enabled = get_option( 'mwseo_options', null )[ 'ai_auto_correct' ] ?? false;
 
 		if ( strlen( $ai_suggestion ) > $expected_size && $expected_size > 0 && $is_auto_correct_enabled) {
@@ -165,14 +186,18 @@ class Meow_MWSEO_Modules_Suggestions
 			$prompt = sprintf('In %s, simplistically paraphrase the following "%s" (currently a %d characters string) into a string with less than %d characters, and ensure that its essential concepts and format are retained. Only the reduced form is required. Shortened string is: ', $language, $ai_suggestion, strlen($ai_suggestion), $expected_size);
 			
 			global $mwai;
-			$ai_suggestion = $mwai->simpleTextQuery( $prompt, [ 'scope' => 'seo-engine'] );
+			$ai_suggestion = $mwai->simpleTextQuery( $prompt, [ 'scope' => 'seo' ] );
 		}
 		
 		return $ai_suggestion;
 	}
 
-    public static function get_post_sample_context( $post ){
-		$core = new Meow_MWSEO_Core();
+    public static function get_post_sample_context( $post, $core = null ){
+		// Get the global core instance if not provided
+		if ( is_null( $core ) ) {
+			global $mwseo_core;
+			$core = $mwseo_core;
+		}
 		$check_live_content = $core->get_option( 'check_live_content', false );
 		
 		$content = '';

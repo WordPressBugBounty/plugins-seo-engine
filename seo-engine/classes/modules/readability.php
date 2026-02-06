@@ -3,6 +3,30 @@
 class Meow_MWSEO_Modules_Readability
 {
 
+	/**
+	 * Detect if text is mostly CJK (Chinese, Japanese, Korean)
+	 * @param string $text Text to analyze
+	 * @param float $threshold Ratio threshold (default 0.9 = 90%)
+	 * @return bool True if text is ≥90% CJK characters
+	 */
+	private function is_mostly_cjk( $text, $threshold = 0.9 ) {
+		if ( empty( $text ) ) {
+			return false;
+		}
+
+		$text_length = mb_strlen( $text, 'UTF-8' );
+		if ( $text_length === 0 ) {
+			return false;
+		}
+
+		// Count CJK characters (Han/Chinese, Hiragana, Katakana, Hangul/Korean)
+		preg_match_all( '/[\p{Han}\p{Hiragana}\p{Katakana}\p{Hangul}]/u', $text, $matches );
+		$cjk_count = count( $matches[0] );
+
+		$ratio = $cjk_count / $text_length;
+		return $ratio >= $threshold;
+	}
+
 	function getVowels( $language ) {
 		$vowels_array = [
 			'english' => [ 'a', 'e', 'i', 'o', 'u', 'y' ],
@@ -87,11 +111,19 @@ class Meow_MWSEO_Modules_Readability
 		$content = trim( $content );
 
 		$word_count = str_word_count( $content );
+
+		// CJK fallback: If word count is near zero, check if content is mostly CJK
+		if ( $word_count < 10 && $this->is_mostly_cjk( $content ) ) {
+			// Estimate word count: each CJK character ≈ 0.6 words (conservative multiplier)
+			$char_length = mb_strlen( $content, 'UTF-8' );
+			$word_count = max( 1, floor( $char_length * 0.6 ) );
+		}
+
 		$readability = [
 			'flesch_kincaid' => 0,
 			'grade' => 'unknown',
 		];
-	
+
 		if ( $word_count == 0 ) {
 			return 0;
 		}
