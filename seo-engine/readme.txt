@@ -4,7 +4,7 @@ Tags: seo, ai, analytics, google, optimization
 Donate link: https://www.patreon.com/meowapps
 Requires at least: 6.0
 Tested up to: 6.9
-Stable tag: 0.5.8
+Stable tag: 0.5.9
 Requires PHP: 7.4
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
@@ -189,6 +189,15 @@ Yes! SEO Engine can track visits from GPTBot, Claude, Gemini, Perplexity, and ma
 SEO Engine works with Polylang, including post filtering and automatic AI language detection.
 
 == Changelog ==
+
+= 0.5.9 (2026/02/12) =
+* Update: Removed Archives, Category, and similar prefixes from archive pages.
+* Fix: Corrected a field event from onChange to onBlur in the bot instructions.
+* Add: Introduced new post selection options in the Settings for Content SEO.
+* Add: Added a "no index" status option in the Post Editor.
+* 🎵 Discuss with others about Seo Engine on [the Discord](https://discord.gg/bHDGh38).
+* 🌴 Keep us motivated with [a little review here](https://wordpress.org/support/plugin/seo-engine/reviews/). Thank you!
+* 🥰 If you want to help us, check our [Patreon](https://www.patreon.com/meowapps). Thank you!
 
 = 0.5.8 (2026/01/30) =
 * Add: New "Page Title" section in Technical SEO settings with an option to disable automatic title generation.

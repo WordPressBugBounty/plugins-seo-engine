@@ -80,6 +80,8 @@ class Meow_MWSEO_Core
 		$auto_page_title = $this->get_option( 'auto_page_title', true );
 		if ( ( $use_content_seo || $use_technical_seo ) && $auto_page_title ) {
 			add_filter( 'pre_get_document_title', [ $this, 'render_title' ], 99, 1 );
+			// Remove WordPress archive prefixes ("Archives: ", "Category: ", etc.) for cleaner SEO titles
+			add_filter( 'get_the_archive_title_prefix', '__return_empty_string' );
 		}
 		if ( $use_content_seo && $use_seo_metadata ) {
 			add_action( 'wp_head', [ $this, 'render_description' ], 99, 0 );

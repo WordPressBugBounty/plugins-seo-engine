@@ -656,6 +656,9 @@ class Meow_MWSEO_Rest
 			update_postmeta_cache($post_ids);
 		}
 
+		$excluded_posts = $this->core->get_option( 'sitemap_excluded_post_ids', [] );
+		$excluded_posts = array_map( 'intval', $excluded_posts );
+
 		$data = [];
 		foreach ($posts as $post) {
 			// Migrate old meta keys to new ones (runs once per post)
@@ -718,6 +721,7 @@ class Meow_MWSEO_Rest
 				'ignored_tests' => is_array($ignored_tests) ? $ignored_tests : [],
 				'fixed' => is_array($magic_fixes_applied) ? $magic_fixes_applied : [],
 				'ai_agents' => $ai_agents_data,
+				'no_index' => in_array($post->ID, $excluded_posts),
 			];
 		}
 
@@ -968,6 +972,27 @@ class Meow_MWSEO_Rest
 		if ( $seo_excerpt !== null ) {
 			$this->update_or_delete_post_meta( $post_id, $this->core->meta_key_seo_excerpt, $seo_excerpt );
 		}
+
+		// Update the no index
+		$no_index = isset( $params['no_index'] ) ? boolVal( $params['no_index'] ) : null;
+		if ( $no_index !== null ) {
+
+			$excluded_posts = $this->core->get_option( 'sitemap_excluded_post_ids', [] );
+			$excluded_posts = array_map( 'intval', $excluded_posts );
+
+			if ( $no_index ) {
+				if ( !in_array( $post_id, $excluded_posts ) ) {
+					$excluded_posts[] = $post_id;
+				}
+			} else {
+				if ( in_array( $post_id, $excluded_posts ) ) {
+					$excluded_posts = array_diff( $excluded_posts, [ $post_id ] );
+				}
+			}
+			
+			$this->core->update_option( 'sitemap_excluded_post_ids', $excluded_posts );
+		}
+
 
 		return new WP_REST_Response( [
 			'success' => true,
