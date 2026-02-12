@@ -1118,7 +1118,7 @@ class Meow_MWSEO_Core
 
 			// Length Guidelines
 			'title_length_min' => 30,
-			'title_length_max' => 60,
+			'title_length_max' => 75,
 			'excerpt_length_min' => 80,
 			'excerpt_length_max' => 160,
 			'content_length_min' => 300,

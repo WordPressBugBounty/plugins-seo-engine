@@ -292,7 +292,7 @@ class Meow_MWSEO_Score {
 
 		try {
 			// Generate summary and detect intent
-			$summary_prompt = "Analyze this content and provide:\n1. A one-sentence summary (max 90 chars)\n2. Content intent (choose one: QuickAnswer, Guide, HowTo, Product, Local, News, or General)\n3. Key entities/topics (max 5)\n\nTitle: {$analysis['title']}\nContent: " . substr( $analysis['content'], 0, 1000 ) . "\n\nRespond in JSON format: {\"summary\": \"...\", \"intent\": \"...\", \"entities\": [...], \"confidence\": 0.0-1.0}";
+			$summary_prompt = "Analyze this content and provide:\n1. A one-sentence summary (max 90 chars)\n2. Content intent (choose one: QuickAnswer, Guide, HowTo, Product, Local, News, or General)\n3. Key entities/topics (max 5)\n\nTitle: {$analysis['title']}\nContent: " . $this->truncate_at_sentence( $analysis['content'], 1000 ) . "\n\nRespond in JSON format: {\"summary\": \"...\", \"intent\": \"...\", \"entities\": [...], \"confidence\": 0.0-1.0}";
 
 			$response = $mwai->simpleTextQuery( $summary_prompt );
 
@@ -383,7 +383,7 @@ class Meow_MWSEO_Score {
 		global $mwai;
 
 		try {
-			$prompt = "Rate how well this title matches the main topic and content (0.0 to 1.0):\n\nTitle: {$analysis['title']}\n\nContent preview: " . substr( $analysis['content'], 0, 1000 ) . "\n\nRate from 0.0 (completely unrelated) to 1.0 (perfectly aligned). Be generous - if the title accurately describes what the content is about, give 0.9 or higher. Only give low scores if the title is misleading or about a different topic. Respond with ONLY a number.";
+			$prompt = "Rate how well this title matches the main topic and content (0.0 to 1.0):\n\nTitle: {$analysis['title']}\n\nContent preview: " . $this->truncate_at_sentence( $analysis['content'], 1000 ) . "\n\nRate from 0.0 (completely unrelated) to 1.0 (perfectly aligned). Be generous - if the title accurately describes what the content is about, give 0.9 or higher. Only give low scores if the title is misleading or about a different topic. Respond with ONLY a number.";
 
 			$result = $mwai->simpleFastTextQuery( $prompt );
 			$score = floatval( trim( $result ) );
@@ -467,6 +467,28 @@ class Meow_MWSEO_Score {
 	}
 
 	/**
+	 * Truncate content at a sentence boundary to avoid feeding incomplete sentences to AI.
+	 */
+	private function truncate_at_sentence( $text, $max_chars = 1500 ) {
+		if ( mb_strlen( $text ) <= $max_chars ) {
+			return $text;
+		}
+		$truncated = mb_substr( $text, 0, $max_chars );
+		// Find last sentence-ending punctuation (.!?。）)
+		$last = max(
+			mb_strrpos( $truncated, '.' ) ?: 0,
+			mb_strrpos( $truncated, '!' ) ?: 0,
+			mb_strrpos( $truncated, '?' ) ?: 0,
+			mb_strrpos( $truncated, '。' ) ?: 0
+		);
+		// Only cut at sentence boundary if we keep at least 60% of the text
+		if ( $last > $max_chars * 0.6 ) {
+			return mb_substr( $truncated, 0, $last + 1 );
+		}
+		return $truncated;
+	}
+
+	/**
 	 * Analyze grammar and typos in content using AI
 	 */
 	private function analyze_grammar( $analysis ) {
@@ -477,14 +499,14 @@ class Meow_MWSEO_Score {
 		}
 
 		try {
-			// Sample content for analysis (first 1500 chars to avoid token limits)
-			$content_sample = substr( $analysis['content'], 0, 1500 );
+			// Sample content for analysis, truncated at sentence boundary
+			$content_sample = $this->truncate_at_sentence( $analysis['content'], 1500 );
 
 			if ( empty( $content_sample ) ) {
 				return ['score' => 100, 'feedback' => '']; // No content to analyze
 			}
 
-			$prompt = "Grammar check. Score 0-100. If < 80, list 2 issues max (e.g., 'Typo: teh→the'). Very brief.\n\nText:\n{$content_sample}\n\nJSON: {\"score\": X, \"feedback\": \"...\"}";
+			$prompt = "Grammar check. Score 0-100. Only flag clear mistakes: misspellings, broken syntax, wrong conjugations, missing words. Ignore stylistic choices, hyphenation preferences, word choice opinions, and formatting. The text may be truncated — do NOT flag the last sentence as incomplete. If < 80, list 2 issues max (e.g., 'Typo: teh→the'). Very brief.\n\nText:\n{$content_sample}\n\nJSON: {\"score\": X, \"feedback\": \"...\"}";
 
 			$response = $mwai->simpleFastTextQuery( $prompt );
 			$response = trim( $response );
@@ -526,14 +548,13 @@ class Meow_MWSEO_Score {
 		}
 
 		try {
-			// Sample content for analysis (first 1500 chars)
-			$content_sample = substr( $analysis['content'], 0, 1500 );
+			$content_sample = $this->truncate_at_sentence( $analysis['content'], 1500 );
 
 			if ( empty( $content_sample ) ) {
 				return ['score' => 100, 'feedback' => ''];
 			}
 
-			$prompt = "Originality check. Score 0-100. If < 70, list 2 generic phrases max. Very brief.\n\nText:\n{$content_sample}\n\nJSON: {\"score\": X, \"feedback\": \"...\"}";
+			$prompt = "Originality check. Score 0-100. Only flag obviously templated or AI-generated phrasing (e.g., 'In today\'s fast-paced world', 'It\'s important to note that'). Creative, literary, or poetic writing is NOT generic. Be lenient — most human-written content should score 70+. If < 70, list 2 generic phrases max. Very brief.\n\nText:\n{$content_sample}\n\nJSON: {\"score\": X, \"feedback\": \"...\"}";
 
 			$response = $mwai->simpleFastTextQuery( $prompt );
 			$response = trim( $response );
@@ -575,8 +596,7 @@ class Meow_MWSEO_Score {
 		}
 
 		try {
-			// Sample content for analysis (first 1500 chars)
-			$content_sample = substr( $analysis['content'], 0, 1500 );
+			$content_sample = $this->truncate_at_sentence( $analysis['content'], 1500 );
 
 			if ( empty( $content_sample ) ) {
 				return ['score' => 100, 'feedback' => ''];
@@ -735,7 +755,7 @@ class Meow_MWSEO_Score {
 
 		try {
 			$title = $analysis['title'];
-			$content_sample = substr( $analysis['content'], 0, 2000 );
+			$content_sample = $this->truncate_at_sentence( $analysis['content'], 2000 );
 
 			if ( empty( $title ) || empty( $content_sample ) ) {
 				return ['score' => 100, 'feedback' => ''];
@@ -1153,7 +1173,7 @@ class Meow_MWSEO_Score {
 
 		// Thresholds in display units (works for all languages)
 		$min = $this->get_option( 'title_length_min', 30 );
-		$max = $this->get_option( 'title_length_max', 60 );
+		$max = $this->get_option( 'title_length_max', 75 );
 
 		return $this->score_length_range( $width, $min, $max );
 	}
@@ -1196,7 +1216,7 @@ class Meow_MWSEO_Score {
 
 		// For substantial posts (300+ words), require at least 1 internal link
 		if ( $word_count >= 300 ) {
-			return $actual >= 1 ? 100 : 0;
+			return $actual >= 1 ? 100 : 30;
 		}
 
 		// For shorter posts, internal links are optional but recommended
@@ -1242,8 +1262,12 @@ class Meow_MWSEO_Score {
 			$has_schema = apply_filters( 'seo_engine_has_schema', false, $post );
 		}
 
-		// No schema at all → full -18 pts penalty
+		// No schema found — skip check if our own schema module is disabled
 		if ( !$has_schema ) {
+			$auto_schema = $this->get_option( 'auto_schema_enabled', true );
+			if ( !$auto_schema ) {
+				return 'NA';
+			}
 			return 0;
 		}
 
@@ -1675,7 +1699,7 @@ class Meow_MWSEO_Score {
 	private function run_summary_step( $post, $analysis ) {
 		global $mwai;
 
-		$summary_prompt = "Analyze this content and provide:\n1. A one-sentence summary (max 90 chars)\n2. Content intent (choose one: QuickAnswer, Guide, HowTo, Product, Local, News, or General)\n3. Key entities/topics (max 5)\n\nTitle: {$analysis['title']}\nContent: " . substr( $analysis['content'], 0, 1000 ) . "\n\nRespond in JSON format: {\"summary\": \"...\", \"intent\": \"...\", \"entities\": [...], \"confidence\": 0.0-1.0}";
+		$summary_prompt = "Analyze this content and provide:\n1. A one-sentence summary (max 90 chars)\n2. Content intent (choose one: QuickAnswer, Guide, HowTo, Product, Local, News, or General)\n3. Key entities/topics (max 5)\n\nTitle: {$analysis['title']}\nContent: " . $this->truncate_at_sentence( $analysis['content'], 1000 ) . "\n\nRespond in JSON format: {\"summary\": \"...\", \"intent\": \"...\", \"entities\": [...], \"confidence\": 0.0-1.0}";
 
 		$response = $mwai->simpleTextQuery( $summary_prompt, [ 'scope' => 'seo' ] );
 

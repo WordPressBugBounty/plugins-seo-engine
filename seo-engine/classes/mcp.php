@@ -41,12 +41,12 @@ class Meow_MWSEO_MCP {
     $title_width = $this->core->get_display_width( $effective_title );
     $desc_width = $this->core->get_display_width( $effective_desc );
 
-    // Evaluate title quality (optimal: 30-60 display units)
+    // Evaluate title quality (optimal: 30-75 display units)
     $title_issues = [];
     if ( $title_width < 30 ) {
       $title_issues[] = 'too_short';
     }
-    if ( $title_width > 60 ) {
+    if ( $title_width > 75 ) {
       $title_issues[] = 'too_long';
     }
 
@@ -408,7 +408,7 @@ class Meow_MWSEO_MCP {
 
     $tools[] = [
       'name' => 'mwseo_get_posts_needing_seo',
-      'description' => 'Find posts where the EFFECTIVE SEO (custom or auto-generated) has actual problems. Uses display width (CJK characters count as 2) to approximate Google SERP pixel limits. Flags titles outside 30-60 width and descriptions outside 80-160 width. More actionable than mwseo_get_posts_missing_seo because it finds posts that genuinely need attention, not just posts without custom SEO.',
+      'description' => 'Find posts where the EFFECTIVE SEO (custom or auto-generated) has actual problems. Uses display width (CJK characters count as 2) to approximate Google SERP pixel limits. Flags titles outside 30-75 width and descriptions outside 80-160 width. More actionable than mwseo_get_posts_missing_seo because it finds posts that genuinely need attention, not just posts without custom SEO.',
       'category' => 'SEO Engine',
       'inputSchema' => [
         'type' => 'object',

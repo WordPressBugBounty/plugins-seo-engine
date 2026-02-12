@@ -4,7 +4,7 @@ Tags: seo, ai, analytics, google, optimization
 Donate link: https://www.patreon.com/meowapps
 Requires at least: 6.0
 Tested up to: 6.9
-Stable tag: 0.5.9
+Stable tag: 0.6.0
 Requires PHP: 7.4
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
@@ -190,7 +190,12 @@ SEO Engine works with Polylang, including post filtering and automatic AI langua
 
 == Changelog ==
 
-= 0.5.9 (2026/02/12) =
+= 0.6.0 (2026/02/12) =
+* Update: Relaxed SEO title length scoring to better support titles between 30–75 characters.
+* Fix: Improved handling of non-English characters in AI-powered SEO suggestion.
+* Update: Made grammar and originality checks less strict.
+* Update: Reduced the penalty for missing internal links to avoid overly harsh SEO scores on shorter content.
+* Fix: Skipped schema validation when the schema module is disabled.
 * Update: Removed Archives, Category, and similar prefixes from archive pages.
 * Fix: Corrected a field event from onChange to onBlur in the bot instructions.
 * Add: Introduced new post selection options in the Settings for Content SEO.
