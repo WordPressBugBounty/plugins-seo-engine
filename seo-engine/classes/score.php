@@ -213,8 +213,12 @@ class Meow_MWSEO_Score {
 
 		// Extract links
 		if ( preg_match_all( '/<a[^>]+href=[\'"]([^\'"]+)[\'"][^>]*>/i', $analysis['content_html'], $matches ) ) {
-			$site_url = get_site_url();
-			$site_url_without_protocol = preg_replace( '#^https?://#', '', $site_url );
+			// Use the post's permalink to derive the site domain, so that
+			// multilingual setups (e.g. Polylang with separate domains) correctly
+			// detect internal links based on the post's own language domain.
+			$permalink = get_permalink( $post->ID );
+			$parsed = parse_url( $permalink );
+			$site_host = isset( $parsed['host'] ) ? $parsed['host'] : parse_url( get_site_url(), PHP_URL_HOST );
 
 			foreach ( $matches[1] as $link ) {
 				$link_trimmed = trim( $link );
@@ -224,12 +228,12 @@ class Meow_MWSEO_Score {
 					continue;
 				}
 
-				// Internal: relative links (/, ./, ../), or contains site domain
+				// Internal: relative links (/, ./, ../), or same domain as the post
 				$is_relative = ( strpos( $link_trimmed, '/' ) === 0 && strpos( $link_trimmed, '//' ) !== 0 )
 					|| strpos( $link_trimmed, './' ) === 0
 					|| strpos( $link_trimmed, '../' ) === 0;
-				$is_same_domain = strpos( $link_trimmed, $site_url ) !== false
-					|| strpos( $link_trimmed, $site_url_without_protocol ) !== false;
+				$link_host = parse_url( $link_trimmed, PHP_URL_HOST );
+				$is_same_domain = $link_host && $link_host === $site_host;
 
 				if ( $is_relative || $is_same_domain ) {
 					$analysis['links']['internal'][] = $link_trimmed;
@@ -651,10 +655,18 @@ class Meow_MWSEO_Score {
 				return 100;
 			}
 
-			// Sample first 2000 chars of HTML for analysis
-			$content_sample = substr( $content_html, 0, 2000 );
+			// Strip Gutenberg block comments (<!-- wp:xxx --> / <!-- /wp:xxx -->)
+			// so the AI sees actual HTML structure, not editor noise.
+			$clean_html = preg_replace( '/<!--\s*\/?wp:[^>]*-->\s*/', '', $content_html );
+			$clean_html = trim( $clean_html );
 
-			$prompt = "Analyze this HTML content for structure quality. Rate from 0-100 based on:\n\n- Heading hierarchy: Single H1, logical H2/H3 tree\n- Paragraph length: Average < 150-180 words, not wall-of-text\n- Scannability: Uses lists, short paragraphs, varied sentence length\n- Avoids keyword-stuffed headings\n- Good use of formatting for readability\n\nScoring:\n- 100 = Excellent structure, very scannable\n- 80-99 = Good structure with minor issues\n- 60-79 = Acceptable but could improve\n- 40-59 = Poor structure, hard to scan\n- 0-39 = Terrible structure, wall of text\n\nHTML:\n{$content_sample}\n\nRespond with ONLY a number between 0 and 100.";
+			if ( empty( $clean_html ) ) {
+				return 100;
+			}
+
+			$content_sample = mb_substr( $clean_html, 0, 3000, 'UTF-8' );
+
+			$prompt = "Analyze this HTML content structure. Rate from 0-100. Only penalize real problems:\n\n- Wall of text: no paragraphs or headings at all\n- Extremely long paragraphs (300+ words without a break)\n- Completely missing subheadings in long content (1000+ words)\n\nDo NOT penalize:\n- Articles that use normal paragraph lengths (even 100-200 words)\n- Content without bullet lists (lists are not required)\n- Literary, editorial, or photo-essay writing styles\n- Content that simply has fewer headings if paragraphs are reasonable\n\nMost well-structured articles should score 80+. Only give below 60 for genuinely hard-to-read walls of text.\n\nHTML:\n{$content_sample}\n\nRespond with ONLY a number between 0 and 100.";
 
 			$result = $mwai->simpleFastTextQuery( $prompt );
 			$result = trim( $result );

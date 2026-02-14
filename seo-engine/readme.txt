@@ -4,7 +4,7 @@ Tags: seo, ai, analytics, google, optimization
 Donate link: https://www.patreon.com/meowapps
 Requires at least: 6.0
 Tested up to: 6.9
-Stable tag: 0.6.0
+Stable tag: 0.6.1
 Requires PHP: 7.4
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
@@ -189,6 +189,12 @@ Yes! SEO Engine can track visits from GPTBot, Claude, Gemini, Perplexity, and ma
 SEO Engine works with Polylang, including post filtering and automatic AI language detection.
 
 == Changelog ==
+
+= 0.6.1 (2026/02/13) =
+* Add: Enhanced "Internal Links" suggestions with section-aware recommendations.
+* Fix: Adjusted the Edit SEO modal to respect configured title and excerpt length.
+* Fix: Reduced false positives in the structure quality check.
+* Fix: Improved internal link detection for Polylang multi-domain setups.
 
 = 0.6.0 (2026/02/12) =
 * Update: Relaxed SEO title length scoring to better support titles between 30–75 characters.
