@@ -592,7 +592,7 @@ class Meow_MWSEO_Rest
 			return $this->error_response( 'Category ID is required.', 'missing_category_id' );
 		}
 		
-		$category = get_term( $category_id, 'category' );
+		$category = get_term( $category_id );
 		if ( !$category || is_wp_error( $category ) ) {
 			return $this->error_response( 'Category not found.', 'category_not_found', 404 );
 		}
@@ -613,24 +613,26 @@ class Meow_MWSEO_Rest
 
 	function rest_update_category_seo( $request ) {
 		$params = $request->get_json_params();
-		$category_id = isset( $params['category_id'] ) ? intval( $params['category_id'] ) : 0;
+		$category_ids = isset( $params['category_ids'] ) ? array_map( 'intval', $params['category_ids'] ) : [];
 		$seo_title = isset( $params['seo_title'] ) ? sanitize_text_field( $params['seo_title'] ) : '';
 		$seo_description = isset( $params['seo_description'] ) ? sanitize_textarea_field( $params['seo_description'] ) : '';
 		
-		if ( empty( $category_id ) ) {
+		if ( empty( $category_ids ) ) {
 			return $this->error_response( 'Category ID is required.', 'missing_category_id' );
 		}
-		
-		$category = get_term( $category_id, 'category' );
-		if ( !$category || is_wp_error( $category ) ) {
-			return $this->error_response( 'Category not found.', 'category_not_found', 404 );
+
+		foreach ( $category_ids as $category_id ) {
+			$category = get_term( $category_id );
+			if ( !$category || is_wp_error( $category ) ) {
+				return $this->error_response( 'Category not found.', 'category_not_found', 404 );
+			}
+			
+			update_term_meta( $category_id, '_mwseo_title', $seo_title );
+			update_term_meta( $category_id, '_mwseo_description', $seo_description );
 		}
 		
-		update_term_meta( $category_id, '_mwseo_title', $seo_title );
-		update_term_meta( $category_id, '_mwseo_description', $seo_description );
-		
 		return $this->success_response( [
-			'category_id' => $category_id,
+			'category_ids' => $category_ids,
 			'seo_title' => $seo_title,
 			'seo_description' => $seo_description,
 		], __( 'Category SEO settings saved successfully.', 'seo-engine' ) );
@@ -639,15 +641,11 @@ class Meow_MWSEO_Rest
 	function rest_ai_generate_category_seo( $request ) {
 		try {
 			$params = $request->get_json_params();
-			$category_id = isset( $params['category_id'] ) ? intval( $params['category_id'] ) : 0;
+			$individual = isset( $params['individual'] ) ? boolval( $params['individual'] ) : false;
+			$category_ids = isset( $params['category_ids'] ) ? array_map( 'intval', $params['category_ids'] ) : [];
 
-			if ( empty( $category_id ) ) {
+			if ( empty( $category_ids ) ) {
 				return $this->error_response( 'Category ID is required.', 'missing_category_id' );
-			}
-
-			$category = get_term( $category_id, 'category' );
-			if ( !$category || is_wp_error( $category ) ) {
-				return $this->error_response( 'Category not found.', 'category_not_found', 404 );
 			}
 
 			global $mwai;
@@ -655,57 +653,94 @@ class Meow_MWSEO_Rest
 				return $this->error_response( 'AI Engine is required for this feature.', 'missing_ai_engine' );
 			}
 
-			// Gather category data for AI context
 			$site_name = get_bloginfo( 'name' );
 			$site_description = get_bloginfo( 'description' );
-			$category_name = $category->name;
-			$category_description = $category->description;
-			$category_slug = $category->slug;
-			$category_count = $category->count;
 
-			// Get some posts from this category for context
-			$posts = get_posts( [
-				'category' => $category_id,
-				'numberposts' => 5,
-				'post_status' => 'publish',
-			] );
-			$post_titles = array_map( function( $post ) {
-				return $post->post_title;
-			}, $posts );
+			// Helper function to generate SEO for a single category
+			$generate_for_category = function( $category_id ) use ( $mwai, $site_name, $site_description ) {
+				$category = get_term( $category_id );
+				if ( !$category || is_wp_error( $category ) ) {
+					return [ 'error' => 'Category not found', 'category_id' => $category_id ];
+				}
 
-			$instructions = "Generate SEO metadata for a WordPress category page. Provide a compelling SEO title (max 60 characters) and SEO description (max 160 characters) that will appear in search engine results.\n\n";
-			$instructions .= "Website: {$site_name}\n";
-			$instructions .= "Website description: {$site_description}\n\n";
-			$instructions .= "Category name: {$category_name}\n";
-			$instructions .= "Category slug: {$category_slug}\n";
-			$instructions .= "Category description: " . ( $category_description ?: 'No description' ) . "\n";
-			$instructions .= "Number of posts: {$category_count}\n";
-			if ( !empty( $post_titles ) ) {
-				$instructions .= "Sample post titles: " . implode( ', ', $post_titles ) . "\n";
+				$category_name = $category->name;
+				$category_description = $category->description;
+				$category_slug = $category->slug;
+				$category_count = $category->count;
+
+				// Get some posts from this category for context
+				$posts = get_posts( [
+					'category' => $category_id,
+					'numberposts' => 5,
+					'post_status' => 'publish',
+				] );
+				$post_titles = array_map( function( $post ) {
+					return $post->post_title;
+				}, $posts );
+
+				$instructions = "Generate SEO metadata for a WordPress category page. Provide a compelling SEO title (max 60 characters) and SEO description (max 160 characters) that will appear in search engine results.\n\n";
+				$instructions .= "Website: {$site_name}\n";
+				$instructions .= "Website description: {$site_description}\n\n";
+				$instructions .= "Category name: {$category_name}\n";
+				$instructions .= "Category slug: {$category_slug}\n";
+				$instructions .= "Category description: " . ( $category_description ?: 'No description' ) . "\n";
+				$instructions .= "Number of posts: {$category_count}\n";
+				if ( !empty( $post_titles ) ) {
+					$instructions .= "Sample post titles: " . implode( ', ', $post_titles ) . "\n";
+				}
+				$instructions .= "\nRespond ONLY with valid JSON in this exact format (no markdown, no code blocks):\n";
+				$instructions .= '{"seo_title": "Your SEO title here", "seo_description": "Your SEO description here"}';
+
+				$ai_response = $mwai->simpleTextQuery( $instructions, [ 'scope' => 'seo' ] );
+				if ( empty( $ai_response ) ) {
+					return [ 'error' => 'AI failed to generate content', 'category_id' => $category_id ];
+				}
+
+				// Parse JSON response
+				$ai_response = trim( $ai_response );
+				// Remove potential markdown code blocks
+				$ai_response = preg_replace( '/^```json\s*/i', '', $ai_response );
+				$ai_response = preg_replace( '/```$/', '', $ai_response );
+				$ai_response = trim( $ai_response );
+
+				$parsed = json_decode( $ai_response, true );
+				if ( json_last_error() !== JSON_ERROR_NONE || !isset( $parsed['seo_title'] ) || !isset( $parsed['seo_description'] ) ) {
+					return [ 'error' => 'Failed to parse AI response', 'category_id' => $category_id ];
+				}
+
+				return [
+					'category_id' => $category_id,
+					'category_name' => $category_name,
+					'seo_title' => sanitize_text_field( $parsed['seo_title'] ),
+					'seo_description' => sanitize_textarea_field( $parsed['seo_description'] ),
+				];
+			};
+
+			// If individual mode with multiple categories, generate for each and return all propositions
+			if ( $individual && count( $category_ids ) > 1 ) {
+				$propositions = [];
+				foreach ( $category_ids as $category_id ) {
+					$result = $generate_for_category( $category_id );
+					$propositions[] = $result;
+				}
+				return $this->success_response( [
+					'individual' => true,
+					'propositions' => $propositions,
+				] );
 			}
-			$instructions .= "\nRespond ONLY with valid JSON in this exact format (no markdown, no code blocks):\n";
-			$instructions .= '{"seo_title": "Your SEO title here", "seo_description": "Your SEO description here"}';
 
-			$ai_response = $mwai->simpleTextQuery( $instructions, [ 'scope' => 'seo' ] );
-			if ( empty( $ai_response ) ) {
-				return $this->error_response( 'AI failed to generate content.', 'ai_error' );
-			}
+			// Single category or non-individual mode: generate for first category only
+			$category_id = $category_ids[0];
+			$result = $generate_for_category( $category_id );
 
-			// Parse JSON response
-			$ai_response = trim( $ai_response );
-			// Remove potential markdown code blocks
-			$ai_response = preg_replace( '/^```json\s*/i', '', $ai_response );
-			$ai_response = preg_replace( '/```$/', '', $ai_response );
-			$ai_response = trim( $ai_response );
-
-			$parsed = json_decode( $ai_response, true );
-			if ( json_last_error() !== JSON_ERROR_NONE || !isset( $parsed['seo_title'] ) || !isset( $parsed['seo_description'] ) ) {
-				return $this->error_response( 'Failed to parse AI response.', 'parse_error' );
+			if ( isset( $result['error'] ) ) {
+				return $this->error_response( $result['error'], 'generation_error' );
 			}
 
 			return $this->success_response( [
-				'seo_title' => sanitize_text_field( $parsed['seo_title'] ),
-				'seo_description' => sanitize_textarea_field( $parsed['seo_description'] ),
+				'individual' => false,
+				'seo_title' => $result['seo_title'],
+				'seo_description' => $result['seo_description'],
 			] );
 
 		} catch ( Exception $e ) {

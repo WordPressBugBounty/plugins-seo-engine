@@ -19,10 +19,10 @@ class Meow_MWSEO_Sitemap extends WP_Sitemaps_Provider
       // Make our own sitemap if the WP sitemap is disabled
       if ( $custom ) {
         // Generate the sitemap on a new post save
-        add_action( 'save_post', array( $this, 'create_sitemap_callback' ), 10, 3 );
+        add_action( 'wp_after_insert_post', array( $this, 'create_sitemap_callback' ), 10, 3 );
 
         // Generate the sitemap on post deletion
-        add_action( 'delete_post', array( $this, 'create_sitemap_callback' ), 10, 3 );
+        // add_action( 'delete_post', array( $this, 'create_sitemap_callback' ), 10, 3 );
 
 
 
@@ -153,12 +153,23 @@ class Meow_MWSEO_Sitemap extends WP_Sitemaps_Provider
   }
 
 
-  public function create_sitemap_callback( $post_id, $post )
+  public function create_sitemap_callback( $post, $update, $before_post )
   {
-    if ( wp_is_post_revision( $post_id ) || $post->post_status != 'publish' ) {
+    $post = is_numeric( $post ) ? get_post( $post ) : $post;
+    if ( wp_is_post_revision( $post ) || $post->post_status != 'publish' ) {
       return;
     }
-    $this->core->log( "🗺️ Sitemap was generated automatically ( Post ID: {$post_id}, Post Title: {$post->post_title} )" );
+
+    if ( defined( 'DOING_AUTOSAVE' ) && DOING_AUTOSAVE ) return;
+
+    if ( get_transient( 'mwseo_sitemap_generating' ) ) {
+        return;
+    }
+    
+    set_transient( 'mwseo_sitemap_generating', true, 5 );
+
+    $this->core->log( "🗺️ Sitemap was generated automatically ( Post ID: {$post->ID}, Post Title: {$post->post_title} )" );
+
     $this->create_sitemap();
   }
 
@@ -313,10 +324,12 @@ private function create_sitemap_for_post_type( $post_type, $excluded_posts = [],
 
     foreach ( $posts as $post ) {
         setup_postdata( $post );
-        $postdate = explode( " ", $post->post_modified );
+        $post_lastmod = $post->post_modified;
+        $lastmod_iso8601 = mysql2date( 'c', $post_lastmod, false );
+
         $xml .= "  <url>\n";
         $xml .= "    <loc>" . esc_url( get_permalink( $post->ID ) ) . "</loc>\n";
-        $xml .= "    <lastmod>" . esc_html( $postdate[0] ) . "</lastmod>\n";
+        $xml .= "    <lastmod>" . esc_html( $lastmod_iso8601 ) . "</lastmod>\n";
         $xml .= "    <changefreq>daily</changefreq>\n";
         $xml .= "    <priority>1.0</priority>\n";
         $xml .= "  </url>\n";

@@ -282,7 +282,14 @@ class Meow_MWSEO_Core
 	}
 
 	function get_categories() {
-		$categories = get_categories( array( 'hide_empty' => false ) );
+		
+		$taxonomy = apply_filters( 'mwseo_category_taxonomies', array( 'category', 'product_cat' ) );
+
+		$categories = get_categories( array(
+			'taxonomy' => $taxonomy,
+			'hide_empty' => false,
+		) );
+
 		return $categories;
 	}
 
@@ -1015,6 +1022,18 @@ class Meow_MWSEO_Core
 			$options['woocommerce_assistant'] = false;
 		}
 
+		// Module hierarchy - disable child features when parent module is disabled
+		// Technical SEO children
+		if ( empty( $options['technical_seo'] ) ) {
+			$options['auto_schema_enabled'] = false;
+			$options['redirect_attachments'] = false;
+			$options['disallow_gpt_bot'] = false;
+			$options['sitemap'] = false;
+			$options['social_networks'] = false;
+			$options['robot_editor'] = false;
+			$options['llms_editor'] = false;
+		}
+
 		// Return sanitized options WITHOUT persisting to database
 		return $options;
 	}
@@ -1150,7 +1169,7 @@ class Meow_MWSEO_Core
 			'check_internal_links' => true,
 			'check_missing_alt_text' => true,
 			'check_orphaned_content' => true,
-			'auto_schema_enabled' => true,
+			'auto_schema_enabled' => false,
 
 			// Length Guidelines
 			'title_length_min' => 30,
