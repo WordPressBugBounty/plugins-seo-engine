@@ -261,10 +261,24 @@ class Meow_MWSEO_Sitemap extends WP_Sitemaps_Provider
 
     // TODO: Maybe we should have an option to choose the filename
     $filename = 'wp-sitemap.xml';
-    $filepath = ABSPATH . $filename;
+
+    $home_path = get_home_path();
+
+    if ( ! is_writable( $home_path ) && ! empty( $_SERVER['DOCUMENT_ROOT'] ) ) {
+        $home_path = $_SERVER['DOCUMENT_ROOT'] . DIRECTORY_SEPARATOR;
+    }
+
+    $filepath = $home_path . $filename;
     $sitepath = site_url( '/' . $filename );
 
-    file_put_contents( $filepath, $index_xml );
+    if ( !empty( $index_xml ) ) {
+        $content = $index_xml;
+        
+        $f = fopen( $filepath, 'w+' );
+        fwrite( $f, $content );
+        fclose( $f );
+    }
+
     $realpath = realpath( $filepath );
 
     $this->core->update_option( 'sitemap_path', $sitepath );

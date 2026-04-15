@@ -990,30 +990,14 @@ class Meow_MWSEO_Core
 		// AI Engine - check status but DON'T modify stored options
 		global $mwai;
 
-		if( is_null( $mwai ) || !isset( $mwai ) ) {
-			$options['ai_engine_status'] = false;
-			$options['ai_engine_message'] = 'AI Engine is not available.';
-		}
-		else {
-
-			try{
-				$mwai->checkStatus();
-				
-				$options['ai_engine_status'] = true;
-				$options['ai_engine_message'] = 'AI Engine is ready.';
-			}
-			catch ( Exception $e ) {
-				$options['ai_engine_status'] = false;
-				$options['ai_engine_message'] = $e->getMessage();
-			}
-			
-		}
+		$options['mwai_has_ai'] = !empty( $mwai ) && $mwai->hasAI();
+		$options['mwai_has_mcp'] = !empty( $mwai ) && $mwai->hasMCP();
+		// Legacy
+		$options['ai_engine_status'] = $options['mwai_has_ai'];
 
 		// AI Features - Only disable in the returned array for UI purposes
 		// DO NOT modify the stored user preferences
-		if ( !$options['ai_engine_status'] ) {
-			// Show features as disabled in UI without changing user's saved preferences
-			// These are temporary overrides for the current request only
+		if ( !$options['mwai_has_ai'] ) {
 			$options['ai_magic_fix'] = false;
 			$options['ai_auto_correct'] = false;
 			$options['ai_magic_wand'] = false;
@@ -1122,8 +1106,9 @@ class Meow_MWSEO_Core
 			'google_analytics_tracking_disabled' => false,
 			
 			// AI Features
+			'mwai_has_ai' => false,
+			'mwai_has_mcp' => false,
 			'ai_engine_status' => false,
-			'ai_engine_message' => '',
 			'ai_magic_fix' => false,
 			'ai_auto_correct' => false,
 			'ai_magic_wand' => false,
@@ -1703,9 +1688,15 @@ class Meow_MWSEO_Core
 	#region Robots.txt
 
 	function get_robots_txt() {
-		$robotsTxt = '';
-		$robots_path = ABSPATH . 'robots.txt';
+		$home_path = get_home_path();
+
+		if ( ! is_writable( $home_path ) && ! empty( $_SERVER['DOCUMENT_ROOT'] ) ) {
+			$home_path = $_SERVER['DOCUMENT_ROOT'] . DIRECTORY_SEPARATOR;
+		}
+
+		$robots_path = $home_path . 'robots.txt';
 		$source = 'none';
+
 		
 		if ( file_exists( $robots_path ) ) {
 			$robotsTxt = file_get_contents( $robots_path );
@@ -1726,10 +1717,37 @@ class Meow_MWSEO_Core
 	}
 
 	function set_robots_txt( $content ) {
-		$robots_path = ABSPATH . 'robots.txt';
-		
-		$result = file_put_contents($robots_path, $content);
-		return $result !== false;
+		$home_path = get_home_path();
+
+		if ( ! is_writable( $home_path ) && ! empty( $_SERVER['DOCUMENT_ROOT'] ) ) {
+			$home_path = $_SERVER['DOCUMENT_ROOT'] . DIRECTORY_SEPARATOR;
+		}
+
+		$robots_file = $home_path . 'robots.txt';
+
+		if( !is_writable( $home_path ) ) {
+			return false;
+		}
+
+		if( !file_exists( $robots_file ) ) {
+			ob_start();
+			error_reporting( 0 );
+			do_robots();
+			$robots_content = ob_get_clean();
+
+			$f = fopen( $robots_file, 'x' );
+			fwrite( $f, $robots_content );
+			fclose( $f );
+		}
+
+		if ( !empty( $content ) ) {
+			$content = sanitize_textarea_field( wp_unslash( $content ) );
+			$f = fopen( $robots_file, 'w+' );
+			fwrite( $f, $content );
+			fclose( $f );
+		}
+
+		return true;
 	}
 
 	#endregion
@@ -1737,8 +1755,13 @@ class Meow_MWSEO_Core
 	#region LLMs.txt
 
 	function get_llms_txt() {
-		$llmsTxt = '';
-		$llms_path = ABSPATH . 'llms.txt';
+		$home_path = get_home_path();
+
+		if ( ! is_writable( $home_path ) && ! empty( $_SERVER['DOCUMENT_ROOT'] ) ) {
+			$home_path = $_SERVER['DOCUMENT_ROOT'] . DIRECTORY_SEPARATOR;
+		}
+
+		$llms_path = $home_path . 'llms.txt';
 		$source = 'none';
 		
 		if ( file_exists( $llms_path ) ) {
@@ -1792,7 +1815,21 @@ class Meow_MWSEO_Core
 	}
 
 	function set_llms_txt( $content ) {
-		$llms_path = ABSPATH . 'llms.txt';
+		$home_path = get_home_path();
+
+		if ( ! is_writable( $home_path ) && ! empty( $_SERVER['DOCUMENT_ROOT'] ) ) {
+			$home_path = $_SERVER['DOCUMENT_ROOT'] . DIRECTORY_SEPARATOR;
+		}
+
+		$llms_path = $home_path . 'llms.txt';
+
+		if( !is_writable( $home_path ) ) {
+			return false;
+		}
+
+		if ( empty( $content ) ) {
+			$content = $this->get_template_llms();
+		}
 
 		$site_url = get_site_url();
 		$site_name = get_bloginfo( 'name' );
@@ -1800,8 +1837,22 @@ class Meow_MWSEO_Core
 		$content = str_replace( '{SITE_URL}', $site_url, $content );
 		$content = str_replace( '{SITE_NAME}', $site_name, $content );
 		
-		$result = file_put_contents( $llms_path, $content );
-		return $result !== false;
+		// Handle UTF-8 BOM for proper browser encoding detection
+		$utf8_bom = "\xEF\xBB\xBF";
+		if ( substr( $content, 0, 3 ) === $utf8_bom ) {
+			$content = substr( $content, 3 );
+		}
+		
+		$content = $utf8_bom . $content;
+		
+		if ( !empty( $content ) ) {
+			$content = sanitize_textarea_field( wp_unslash( $content ) );
+			$f = fopen( $llms_path, 'w+' );
+			fwrite( $f, $content );
+			fclose( $f );
+		}
+
+		return true;
 	}
 
 	#endregion

@@ -4,7 +4,7 @@ Tags: seo, ai, analytics, google, optimization
 Donate link: https://www.patreon.com/meowapps
 Requires at least: 6.0
 Tested up to: 6.9
-Stable tag: 0.6.3
+Stable tag: 0.6.4
 Requires PHP: 7.4
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
@@ -189,6 +189,18 @@ Yes! SEO Engine can track visits from GPTBot, Claude, Gemini, Perplexity, and ma
 SEO Engine works with Polylang, including post filtering and automatic AI language detection.
 
 == Changelog ==
+
+= 0.6.4 (2026/04/15) =
+* Fix: Downgraded XSL version from 2.0 to 1.0 in sitemap stylesheets for broader compatibility.
+* Update: Improved sitemap file path handling and file writing logic.
+* Update: Refactored robots.txt and llms.txt handling to use dynamic paths and improved file writing logic.
+* Update: Empty LLMs now use a template instead of an error message.
+* Fix: Corrected NekoMessage variant.
+* Update: Switched to AI Engine's new hasAI() and hasMCP() helpers; MCP no longer requires an API key.
+* Add: UTF-8 BOM for llms.txt.
+* 🎵 Discuss with others about Seo Engine on [the Discord](https://discord.gg/bHDGh38).
+* 🌴 Keep us motivated with [a little review here](https://wordpress.org/support/plugin/seo-engine/reviews/). Thank you!
+* 🥰 If you want to help us, check our [Patreon](https://www.patreon.com/meowapps). Thank you!
 
 = 0.6.3 (2026/03/10) =
 * Fix: Corrected sitemap last modified dates so search engines receive accurate update information.

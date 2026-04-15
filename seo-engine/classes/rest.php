@@ -2330,13 +2330,6 @@ class Meow_MWSEO_Rest
 		$params  = $request->get_json_params();
 		$content = $params['content'] ?? '';
 
-		if ( empty( $content ) ) {
-			return new WP_REST_Response( [ 
-				'success' => false, 
-				'message' => 'Content is empty. Please provide valid content.'
-			], 400 );
-		}
-
 		// Validate the content (basic validation)
 		if ( strlen( $content ) > 50000 ) {
 			return new WP_REST_Response( [ 
