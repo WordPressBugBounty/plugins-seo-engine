@@ -4,7 +4,7 @@ Tags: seo, ai, analytics, google, optimization
 Donate link: https://www.patreon.com/meowapps
 Requires at least: 6.0
 Tested up to: 6.9
-Stable tag: 0.6.4
+Stable tag: 0.6.5
 Requires PHP: 7.4
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
@@ -189,6 +189,12 @@ Yes! SEO Engine can track visits from GPTBot, Claude, Gemini, Perplexity, and ma
 SEO Engine works with Polylang, including post filtering and automatic AI language detection.
 
 == Changelog ==
+
+= 0.6.5 (2026/04/25) =
+* Add: Google Setup documentation link.
+* Add: Canonical URL support in the post editor.
+* Fix: AI suggestions now use the post's actual language instead of the global language on Polylang/WPML sites.
+* Update: Better UI/UX.
 
 = 0.6.4 (2026/04/15) =
 * Fix: Downgraded XSL version from 2.0 to 1.0 in sitemap stylesheets for broader compatibility.

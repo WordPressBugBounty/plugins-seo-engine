@@ -20,7 +20,7 @@ class Meow_MWSEO_Modules_Suggestions
 			return false;
 		}
 
-		$language    = $core->get_option( 'language', 'English' );
+		$language    = $core->get_post_language_name( $post->ID );
 		$ai_keywords = $core->get_option( 'ai_keywords', false );
 
 		$originalContent = $customContent?? Meow_MWSEO_Modules_Suggestions::get_post_sample_context( $post, $core );

@@ -915,6 +915,7 @@ class Meow_MWSEO_Rest
 				'fixed' => is_array($magic_fixes_applied) ? $magic_fixes_applied : [],
 				'ai_agents' => $ai_agents_data,
 				'no_index' => in_array($post->ID, $excluded_posts),
+				'canonical_url' => get_post_meta($post->ID, '_mwseo_canonical', true),
 			];
 		}
 
@@ -1184,6 +1185,12 @@ class Meow_MWSEO_Rest
 			}
 			
 			$this->core->update_option( 'sitemap_excluded_post_ids', $excluded_posts );
+		}
+
+		// Update the canonical URL
+		$canonical_url = $params['canonical_url'] ?? null;
+		if ( $canonical_url !== null ) {
+			$this->update_or_delete_post_meta( $post_id, '_mwseo_canonical', $canonical_url );
 		}
 
 

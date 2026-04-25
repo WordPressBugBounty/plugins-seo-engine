@@ -85,6 +85,7 @@ class Meow_MWSEO_Core
 		}
 		if ( $use_content_seo && $use_seo_metadata ) {
 			add_action( 'wp_head', [ $this, 'render_description' ], 99, 0 );
+			add_action( 'wp_head', [ $this, 'render_canonical' ], 99, 0 );
 		}
 
 		add_action( 'init', [ $this, 'reject_gptbot_user_agent' ], 99, 0 );
@@ -663,6 +664,14 @@ class Meow_MWSEO_Core
 		$excerpt = $this->build_excerpt( $post );
 		$excerpt = trim( strip_tags( $excerpt ) );
 		echo '<meta class="mwseo-meta" name="description" content="' . esc_html( $excerpt ) . '" />';
+	}
+
+	function render_canonical() {
+		global $post;
+		$canonical = get_post_meta( $post->ID, '_mwseo_canonical', true );
+		if ( !empty( $canonical ) ) {
+			echo '<link class="mwseo-canonical" rel="canonical" href="' . esc_url( $canonical ) . '" />';
+		}
 	}
 
 	function get_images_from_content( $content ) {
@@ -1641,6 +1650,29 @@ class Meow_MWSEO_Core
 		else {
 			return null;
 		}
+	}
+
+	// Returns a human-readable language name for AI prompts.
+	// Falls back to the global 'language' option when Polylang/WPML is absent
+	// or the post has no language assigned.
+	function get_post_language_name( $post_id ) {
+		$post_locale = null;
+		if ( function_exists( 'pll_get_post_language' ) ) {
+			$post_locale = pll_get_post_language( $post_id, 'locale' );
+		}
+		elseif ( function_exists( 'wpml_get_language_information' ) ) {
+			$info = wpml_get_language_information( null, $post_id );
+			if ( ! is_wp_error( $info ) && ! empty( $info['locale'] ) ) {
+				$post_locale = $info['locale'];
+			}
+		}
+		if ( $post_locale ) {
+			$name = $this->get_language_name( $post_locale );
+			if ( $name ) {
+				return $name;
+			}
+		}
+		return $this->get_option( 'language', 'English' );
 	}
 
 	#endregion
