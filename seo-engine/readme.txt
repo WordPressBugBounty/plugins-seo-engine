@@ -1,10 +1,10 @@
-=== SEO Engine ===
+=== SEO Engine - Smart SEO with AI, Schema & Redirection for WordPress ===
 Contributors: TigrouMeow
-Tags: seo, ai, analytics, google, optimization
+Tags: seo, redirection, sitemap, schema, analytics
 Donate link: https://www.patreon.com/meowapps
 Requires at least: 6.0
 Tested up to: 6.9
-Stable tag: 0.6.5
+Stable tag: 0.7.0
 Requires PHP: 7.4
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
@@ -26,6 +26,9 @@ Analyze and optimize your content with AI-powered insights. Get real-time scores
 
 🛠️ **Technical SEO**
 All the SEO basics, straight to the point. No endless settings for features you don't need—just what actually matters.
+
+🚦 **Redirections & 404**
+A clean redirect manager paired with a 404 monitor. Spot broken links, convert any 404 into a redirect with one click, and let SEO Engine create 301s automatically when slugs change.
 
 🧠 **Intelligence Features**
 Full MCP support means your entire site's SEO data is queryable via ChatGPT or Claude. Ask anything, get insights, automate workflows. That's all in the free version.
@@ -75,6 +78,27 @@ All the basics you need, without the bloat. Most SEO plugins bury essential feat
 * Canonical URLs
 * Meta Tags
 * Structured Data
+
+== 🚦 Redirections & 404 ==
+
+A focused redirect manager and 404 monitor that pair naturally: most 404s should become redirects, and the workflow is built around that.
+
+**Redirect Manager:**
+
+* Exact-path redirects with 301, 302, 307, 308, and 410 Gone
+* Hit counter and last-hit timestamp on every rule, so you know which ones are useful
+* Sub-millisecond lookup on the front-end (object-cached, hashed, deferred writes)
+* Static assets (images, CSS, JS, fonts) skipped automatically — no log bloat
+* Optional auto 301 when a published post or page slug changes (off by default)
+* Regex match type with capture groups for advanced rewrites
+
+**404 Monitor:**
+
+* Aggregated log — one row per unique URL, with hit count, first/last seen, and last referer
+* One-click "Convert to Redirect" from any 404 entry
+* Crawler filter so the log stays focused on real visitors
+* Path exclusions with wildcards (e.g. `/feed*`, `/wp-admin/*`)
+* Daily auto-prune with configurable retention
 
 == 🧠 Intelligence Features ==
 
@@ -188,7 +212,16 @@ Yes! SEO Engine can track visits from GPTBot, Claude, Gemini, Perplexity, and ma
 
 SEO Engine works with Polylang, including post filtering and automatic AI language detection.
 
+= Do I still need a separate Redirection plugin? =
+
+No. The Redirections & 404 module handles URL redirects (301, 302, 307, 308, 410) and tracks 404s in one place. You can convert any 404 into a redirect with one click, and slug changes can be auto-redirected for you. Regex redirects are available in the Pro version.
+
 == Changelog ==
+
+= 0.7.0 (2026/05/10) =
+* Add: Redirections + 404 module — manage URL redirects, monitor 404 errors, and convert any 404 into a redirect with one click.
+* Add: Optional auto 301 when a published post or page slug changes.
+* Add: Regex match type for redirect rules.
 
 = 0.6.5 (2026/04/25) =
 * Add: Google Setup documentation link.

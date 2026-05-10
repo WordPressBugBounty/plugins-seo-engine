@@ -490,7 +490,7 @@ class Meow_MWSEO_Rest
 			#endregion
 
 
-			#region REST Sitemap	
+			#region REST Sitemap
 			register_rest_route( $this->namespace, '/sitemap/generate', array(
 				'methods' => 'GET',
 				'permission_callback' => array( $this->core, 'can_access_settings' ),
@@ -498,7 +498,45 @@ class Meow_MWSEO_Rest
 			) );
 
 			#endregion
-		
+
+			#region REST Redirects + 404
+			register_rest_route( $this->namespace, '/redirects/list', array(
+				'methods' => 'POST',
+				'permission_callback' => array( $this->core, 'can_access_settings' ),
+				'callback' => array( $this, 'rest_redirects_list' )
+			) );
+			register_rest_route( $this->namespace, '/redirects/save', array(
+				'methods' => 'POST',
+				'permission_callback' => array( $this->core, 'can_access_settings' ),
+				'callback' => array( $this, 'rest_redirects_save' )
+			) );
+			register_rest_route( $this->namespace, '/redirects/delete', array(
+				'methods' => 'POST',
+				'permission_callback' => array( $this->core, 'can_access_settings' ),
+				'callback' => array( $this, 'rest_redirects_delete' )
+			) );
+			register_rest_route( $this->namespace, '/redirects/bulk', array(
+				'methods' => 'POST',
+				'permission_callback' => array( $this->core, 'can_access_settings' ),
+				'callback' => array( $this, 'rest_redirects_bulk' )
+			) );
+			register_rest_route( $this->namespace, '/redirects/404/convert', array(
+				'methods' => 'POST',
+				'permission_callback' => array( $this->core, 'can_access_settings' ),
+				'callback' => array( $this, 'rest_redirects_404_convert' )
+			) );
+			register_rest_route( $this->namespace, '/redirects/404/ignore', array(
+				'methods' => 'POST',
+				'permission_callback' => array( $this->core, 'can_access_settings' ),
+				'callback' => array( $this, 'rest_redirects_404_ignore' )
+			) );
+			register_rest_route( $this->namespace, '/redirects/404/clear', array(
+				'methods' => 'POST',
+				'permission_callback' => array( $this->core, 'can_access_settings' ),
+				'callback' => array( $this, 'rest_redirects_404_clear' )
+			) );
+			#endregion
+
 		}
 		catch (Exception $e) {
 			var_dump($e);
@@ -2451,12 +2489,165 @@ class Meow_MWSEO_Rest
 	function rest_sitemap_generate() {
 		try {
 			$res = $this->core->generate_sitemap();
-			return new WP_REST_Response( [ 
-				'success' => true, 
+			return new WP_REST_Response( [
+				'success' => true,
 				'data' => $res
 			], 200 );
 		} catch ( Exception $e ) {
 			return new WP_REST_Response( [ 'success' => false, 'message' => $e->getMessage() ], 500 );
+		}
+	}
+
+	#endregion
+
+	#region Redirects + 404
+
+	private function get_redirects_module() {
+		if ( !$this->core->redirects_module ) {
+			return null;
+		}
+		return $this->core->redirects_module;
+	}
+
+	function rest_redirects_list( $request ) {
+		try {
+			$mod = $this->get_redirects_module();
+			if ( !$mod ) { return $this->error_response( 'Redirects module unavailable.', 'no_module', 500 ); }
+
+			$params = $request->get_json_params();
+			$type = isset( $params['type'] ) && $params['type'] === 'not_found' ? 'not_found' : 'rule';
+
+			$args = array(
+				'search' => isset( $params['search'] ) ? (string) $params['search'] : '',
+				'sort' => isset( $params['sort'] ) ? (string) $params['sort'] : null,
+				'order' => isset( $params['order'] ) ? (string) $params['order'] : 'DESC',
+				'page' => isset( $params['page'] ) ? intval( $params['page'] ) : 1,
+				'limit' => isset( $params['limit'] ) ? intval( $params['limit'] ) : 50,
+			);
+			if ( $args['sort'] === null ) { unset( $args['sort'] ); }
+
+			if ( $type === 'not_found' ) {
+				$args['include_ignored'] = !empty( $params['include_ignored'] );
+				$data = $mod->list_404s( $args );
+			} else {
+				if ( isset( $params['enabled'] ) && $params['enabled'] !== '' && $params['enabled'] !== null ) {
+					$args['enabled'] = (int) (bool) $params['enabled'];
+				}
+				$data = $mod->list_redirects( $args );
+			}
+
+			return $this->success_response( $data );
+		} catch ( Exception $e ) {
+			return $this->error_response( $e->getMessage(), 'exception', 500 );
+		}
+	}
+
+	function rest_redirects_save( $request ) {
+		try {
+			$mod = $this->get_redirects_module();
+			if ( !$mod ) { return $this->error_response( 'Redirects module unavailable.', 'no_module', 500 ); }
+
+			$params = $request->get_json_params();
+			$result = $mod->save_redirect( $params );
+			if ( is_wp_error( $result ) ) {
+				$status = $result->get_error_code() === 'pro_required' ? 403 : 400;
+				return $this->error_response( $result->get_error_message(), $result->get_error_code(), $status );
+			}
+			return $this->success_response( $result );
+		} catch ( Exception $e ) {
+			return $this->error_response( $e->getMessage(), 'exception', 500 );
+		}
+	}
+
+	function rest_redirects_delete( $request ) {
+		try {
+			$mod = $this->get_redirects_module();
+			if ( !$mod ) { return $this->error_response( 'Redirects module unavailable.', 'no_module', 500 ); }
+
+			$params = $request->get_json_params();
+			$ids = isset( $params['ids'] ) ? $params['ids'] : ( isset( $params['id'] ) ? array( $params['id'] ) : array() );
+			$count = $mod->delete_redirects( $ids );
+			return $this->success_response( array( 'deleted' => $count ) );
+		} catch ( Exception $e ) {
+			return $this->error_response( $e->getMessage(), 'exception', 500 );
+		}
+	}
+
+	function rest_redirects_bulk( $request ) {
+		try {
+			$mod = $this->get_redirects_module();
+			if ( !$mod ) { return $this->error_response( 'Redirects module unavailable.', 'no_module', 500 ); }
+
+			$params = $request->get_json_params();
+			$action = isset( $params['action'] ) ? (string) $params['action'] : '';
+			$ids = isset( $params['ids'] ) ? $params['ids'] : array();
+			if ( !in_array( $action, array( 'enable', 'disable', 'delete' ), true ) ) {
+				return $this->error_response( 'Unknown bulk action.', 'invalid_action', 400 );
+			}
+			$count = $mod->bulk_redirects( $action, $ids );
+			return $this->success_response( array( 'affected' => $count ) );
+		} catch ( Exception $e ) {
+			return $this->error_response( $e->getMessage(), 'exception', 500 );
+		}
+	}
+
+	function rest_redirects_404_convert( $request ) {
+		try {
+			$mod = $this->get_redirects_module();
+			if ( !$mod ) { return $this->error_response( 'Redirects module unavailable.', 'no_module', 500 ); }
+
+			$params = $request->get_json_params();
+			$id = isset( $params['id'] ) ? intval( $params['id'] ) : 0;
+			if ( $id <= 0 ) {
+				return $this->error_response( 'Missing 404 entry id.', 'invalid_id', 400 );
+			}
+			$extra = array(
+				'target_url' => isset( $params['target_url'] ) ? (string) $params['target_url'] : '',
+				'status_code' => isset( $params['status_code'] ) ? intval( $params['status_code'] ) : 301,
+				'notes' => isset( $params['notes'] ) ? (string) $params['notes'] : 'Created from 404 log',
+			);
+			$result = $mod->convert_404( $id, $extra );
+			if ( is_wp_error( $result ) ) {
+				return $this->error_response( $result->get_error_message(), $result->get_error_code(), 400 );
+			}
+			return $this->success_response( $result );
+		} catch ( Exception $e ) {
+			return $this->error_response( $e->getMessage(), 'exception', 500 );
+		}
+	}
+
+	function rest_redirects_404_ignore( $request ) {
+		try {
+			$mod = $this->get_redirects_module();
+			if ( !$mod ) { return $this->error_response( 'Redirects module unavailable.', 'no_module', 500 ); }
+
+			$params = $request->get_json_params();
+			$ids = isset( $params['ids'] ) ? $params['ids'] : ( isset( $params['id'] ) ? array( $params['id'] ) : array() );
+			$ignored = !isset( $params['ignored'] ) ? true : (bool) $params['ignored'];
+			$count = $mod->ignore_404( $ids, $ignored );
+			return $this->success_response( array( 'affected' => $count ) );
+		} catch ( Exception $e ) {
+			return $this->error_response( $e->getMessage(), 'exception', 500 );
+		}
+	}
+
+	function rest_redirects_404_clear( $request ) {
+		try {
+			$mod = $this->get_redirects_module();
+			if ( !$mod ) { return $this->error_response( 'Redirects module unavailable.', 'no_module', 500 ); }
+
+			$params = $request->get_json_params();
+			$mode = isset( $params['mode'] ) ? (string) $params['mode'] : 'all';
+			if ( $mode === 'ids' ) {
+				$ids = isset( $params['ids'] ) ? $params['ids'] : array();
+				$count = $mod->delete_404s( $ids );
+			} else {
+				$older_than = isset( $params['older_than_days'] ) ? intval( $params['older_than_days'] ) : 0;
+				$count = $mod->clear_404s( $older_than );
+			}
+			return $this->success_response( array( 'deleted' => $count ) );
+		} catch ( Exception $e ) {
+			return $this->error_response( $e->getMessage(), 'exception', 500 );
 		}
 	}
 

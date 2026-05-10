@@ -23,6 +23,7 @@ class Meow_MWSEO_Core
 	private $insights_module = null;
 	private $analytics_module = null;
 	private $googleanalytics_module = null;
+	public $redirects_module = null;
 
 	public function __construct() {
 		global $mwseo_core;
@@ -124,6 +125,11 @@ class Meow_MWSEO_Core
 		// Google Analytics
 		if ( class_exists( 'Meow_MWSEO_Modules_GoogleAnalytics' ) ) {
 			$this->googleanalytics_module = new Meow_MWSEO_Modules_GoogleAnalytics( $this );
+		}
+
+		// Redirects + 404 monitor
+		if ( class_exists( 'Meow_MWSEO_Modules_Redirects' ) ) {
+			$this->redirects_module = new Meow_MWSEO_Modules_Redirects( $this );
 		}
 
 		// MCP integration - check both class and global variable
@@ -668,6 +674,9 @@ class Meow_MWSEO_Core
 
 	function render_canonical() {
 		global $post;
+		if ( ! $post instanceof WP_Post ) {
+			return;
+		}
 		$canonical = get_post_meta( $post->ID, '_mwseo_canonical', true );
 		if ( !empty( $canonical ) ) {
 			echo '<link class="mwseo-canonical" rel="canonical" href="' . esc_url( $canonical ) . '" />';
@@ -1206,6 +1215,15 @@ class Meow_MWSEO_Core
 			'score_check_links' => true,
 			'score_check_readability' => true,
 			
+			// Redirections + 404
+			'redirects_enabled' => false,
+			'redirects_track_404' => true,
+			'redirects_auto_slug' => false,
+			'redirects_default_status' => 301,
+			'redirects_404_retention_days' => 30,
+			'redirects_404_exclude' => "/wp-admin/*\n/feed*\n/xmlrpc.php",
+			'redirects_skip_bots' => true,
+
 			// Maintenance & Others
 			'logs' => false,
 			'hide_dashboard_message' => false,
@@ -1720,6 +1738,9 @@ class Meow_MWSEO_Core
 	#region Robots.txt
 
 	function get_robots_txt() {
+		if ( ! function_exists( 'get_home_path' ) ) {
+			require_once ABSPATH . 'wp-admin/includes/file.php';
+		}
 		$home_path = get_home_path();
 
 		if ( ! is_writable( $home_path ) && ! empty( $_SERVER['DOCUMENT_ROOT'] ) ) {
@@ -1749,6 +1770,9 @@ class Meow_MWSEO_Core
 	}
 
 	function set_robots_txt( $content ) {
+		if ( ! function_exists( 'get_home_path' ) ) {
+			require_once ABSPATH . 'wp-admin/includes/file.php';
+		}
 		$home_path = get_home_path();
 
 		if ( ! is_writable( $home_path ) && ! empty( $_SERVER['DOCUMENT_ROOT'] ) ) {
@@ -1787,6 +1811,9 @@ class Meow_MWSEO_Core
 	#region LLMs.txt
 
 	function get_llms_txt() {
+		if ( ! function_exists( 'get_home_path' ) ) {
+			require_once ABSPATH . 'wp-admin/includes/file.php';
+		}
 		$home_path = get_home_path();
 
 		if ( ! is_writable( $home_path ) && ! empty( $_SERVER['DOCUMENT_ROOT'] ) ) {
@@ -1847,6 +1874,9 @@ class Meow_MWSEO_Core
 	}
 
 	function set_llms_txt( $content ) {
+		if ( ! function_exists( 'get_home_path' ) ) {
+			require_once ABSPATH . 'wp-admin/includes/file.php';
+		}
 		$home_path = get_home_path();
 
 		if ( ! is_writable( $home_path ) && ! empty( $_SERVER['DOCUMENT_ROOT'] ) ) {
