@@ -24,7 +24,13 @@ class Meow_MWSEO_Modules_Analytics
 		"Anthropic-Claude",
 		"anthropic-ai",
 
-		// Google
+		// Google — variants MUST come before the generic "Googlebot" entry,
+		// because is_ai_agent() returns the first substring match and breaks.
+		"Googlebot-Image",
+		"Googlebot-News",
+		"Googlebot-Video",
+		"Googlebot-Mobile",
+		"Googlebot",
 		"Google-Extended",
 		"Bard-AI",
 		"Gemini-AI",

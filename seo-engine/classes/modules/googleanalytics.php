@@ -134,6 +134,12 @@ class Meow_MWSEO_Modules_GoogleAnalytics
 			return false;
 		}
 
+		// Other modules (e.g. Search Console) use the same redirect URL and disambiguate
+		// via the OAuth `state` parameter. Only handle callbacks intended for GA.
+		if ( !empty( $_GET['state'] ) && $_GET['state'] !== 'mwseo_ga' ) {
+			return false;
+		}
+
 		$code = sanitize_text_field( $_GET['code'] );
 
 		if ( empty( $code ) ) {
@@ -150,13 +156,14 @@ class Meow_MWSEO_Modules_GoogleAnalytics
 
 	public function get_auth_url() {
 
-		$params = array( 
+		$params = array(
 			'response_type' => 'code',
 			'client_id' => $this->client_id,
 			'redirect_uri' => $this->get_redirect_url(),
 			'scope' => self::SCOPE_URL,
 			'access_type' => 'offline',
-			'prompt' => 'consent'
+			'prompt' => 'consent',
+			'state' => 'mwseo_ga'
 		);
 
 		return self::AUTH_URL . '?' . http_build_query( $params );

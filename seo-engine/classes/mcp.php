@@ -752,7 +752,7 @@ class Meow_MWSEO_MCP {
     // Magic Fix / Issues
     $tools[] = [
       'name' => 'mwseo_get_issues',
-      'description' => 'Get detailed SEO issues found for a post. Returns a list of specific problems (e.g., "excerpt_length", "readability_score", "alt_coverage") with their current scores and what needs to be fixed. This is the detailed breakdown that shows exactly what is wrong with the post SEO.',
+      'description' => 'Get SEO issues. With post_id: detailed per-post breakdown (which tests failed, scores, severity). Without post_id: site-wide aggregate showing the most common failing tests across all scanned posts (which problems to fix first).',
       'category' => 'SEO Engine',
       'accessLevel' => 'read',
       'inputSchema' => [
@@ -760,10 +760,296 @@ class Meow_MWSEO_MCP {
         'properties' => [
           'post_id' => [
             'type' => 'integer',
-            'description' => 'The WordPress post ID'
+            'description' => 'Optional. The WordPress post ID for a per-post breakdown. Omit for a site-wide aggregate.'
+          ],
+          'sample_size' => [
+            'type' => 'integer',
+            'description' => 'Site-wide mode only. Maximum number of scanned posts to aggregate over. Default 5000.',
+            'default' => 5000
+          ]
+        ]
+      ]
+    ];
+
+    $tools[] = [
+      'name' => 'mwseo_suggest_seo_title',
+      'description' => 'Generate AI-written SEO title candidates for a post, typically used after mwseo_gsc_quick_wins surfaces a CTR opportunity. Returns 3 candidate titles (configurable). The agent picks one and applies it via mwseo_set_seo_title. Optionally pass target_query to steer the candidates toward a specific search query the page already ranks for. Requires AI Engine.',
+      'category' => 'SEO Engine',
+      'accessLevel' => 'read',
+      'inputSchema' => [
+        'type' => 'object',
+        'properties' => [
+          'post_id' => [
+            'type' => 'integer',
+            'description' => 'The post ID to suggest titles for.'
+          ],
+          'target_query' => [
+            'type' => 'string',
+            'description' => 'Optional. A search query the page should rank for. Candidates will naturally include this phrasing.'
+          ],
+          'count' => [
+            'type' => 'integer',
+            'description' => 'Number of candidate titles to return. Default 3, max 10.',
+            'default' => 3
           ]
         ],
-        'required' => ['post_id']
+        'required' => [ 'post_id' ]
+      ]
+    ];
+
+    $tools[] = [
+      'name' => 'mwseo_get_orphan_pages',
+      'description' => 'Find published posts that have zero inbound internal links (no other post on the site links to them). Substantive orphans are the highest-value target for adding internal links. Filters keep the list actionable on large sites; defaults focus on substantive posts (>=300 words). Up to 2000 candidates scanned per call.',
+      'category' => 'SEO Engine',
+      'accessLevel' => 'read',
+      'inputSchema' => [
+        'type' => 'object',
+        'properties' => [
+          'post_type' => [
+            'type' => 'string',
+            'description' => 'Post type to scan. Defaults to "post".',
+            'default' => 'post'
+          ],
+          'lang' => [
+            'type' => 'string',
+            'description' => 'Optional. Polylang language slug (e.g. "en", "fr", "ja"). Only effective if Polylang is active.'
+          ],
+          'created_after' => [
+            'type' => 'string',
+            'description' => 'Optional. ISO date (YYYY-MM-DD). Only consider posts created on or after this date. Useful to skip very old content.'
+          ],
+          'min_word_count' => [
+            'type' => 'integer',
+            'description' => 'Skip posts below this word count. Default 300 (substantive posts only). CJK content is estimated via character count.',
+            'default' => 300
+          ],
+          'limit' => [
+            'type' => 'integer',
+            'description' => 'Maximum number of orphans to return, sorted by word count desc. Default 50, max 500.',
+            'default' => 50
+          ]
+        ]
+      ]
+    ];
+
+    $tools[] = [
+      'name' => 'mwseo_suggest_internal_links',
+      'description' => 'Get AI-ranked internal-link candidate posts (no placement suggestions). FAST: extracts keywords, gathers candidates, AI-ranks the top matches, returns each with a context excerpt so you can judge relevance, usually 5 to 15 seconds total. To generate concrete placement options (search/replace snippets) for one of these candidates, call mwseo_generate_internal_link_placements afterwards with the source + chosen target. Accepts an existing post_id OR a draft_content payload. Requires Pro and AI Engine.',
+      'category' => 'SEO Engine',
+      'accessLevel' => 'read',
+      'inputSchema' => [
+        'type' => 'object',
+        'properties' => [
+          'post_id' => [
+            'type' => 'integer',
+            'description' => 'WordPress post ID of an existing post. Either this OR draft_content must be provided.'
+          ],
+          'draft_content' => [
+            'type' => 'object',
+            'description' => 'Draft payload for unsaved content (use during drafting before publish). Either this OR post_id must be provided.',
+            'properties' => [
+              'title' => [ 'type' => 'string', 'description' => 'Draft title' ],
+              'content' => [ 'type' => 'string', 'description' => 'Draft body (HTML or plain text)' ],
+              'post_type' => [ 'type' => 'string', 'description' => 'Optional. Defaults to "post".', 'default' => 'post' ]
+            ],
+            'required' => [ 'title', 'content' ]
+          ],
+          'max_candidates' => [
+            'type' => 'integer',
+            'description' => 'Maximum candidates returned. Default 10, max 10.',
+            'default' => 10
+          ]
+        ]
+      ]
+    ];
+
+    $tools[] = [
+      'name' => 'mwseo_generate_internal_link_placements',
+      'description' => 'Given a source post (or draft) and ONE target post, generate AI placement suggestions: each suggestion is a {search, replace, reason} triple ready to apply, using up to 4 strategies (link existing text → add in parenthesis → add new sentence → add at end). Usually 5-10 seconds. Call this after mwseo_suggest_internal_links to drill into the most promising candidate. Requires Pro and AI Engine.',
+      'category' => 'SEO Engine',
+      'accessLevel' => 'read',
+      'inputSchema' => [
+        'type' => 'object',
+        'properties' => [
+          'post_id' => [
+            'type' => 'integer',
+            'description' => 'Source post ID. Either this OR draft_content must be provided.'
+          ],
+          'draft_content' => [
+            'type' => 'object',
+            'description' => 'Draft source payload. Either this OR post_id must be provided.',
+            'properties' => [
+              'title' => [ 'type' => 'string' ],
+              'content' => [ 'type' => 'string' ],
+              'post_type' => [ 'type' => 'string', 'default' => 'post' ]
+            ],
+            'required' => [ 'title', 'content' ]
+          ],
+          'target_post_id' => [
+            'type' => 'integer',
+            'description' => 'Target post ID (from a candidate returned by mwseo_suggest_internal_links).'
+          ]
+        ],
+        'required' => [ 'target_post_id' ]
+      ]
+    ];
+
+    // Google Search Console (Pro)
+    $tools[] = [
+      'name' => 'mwseo_gsc_status',
+      'description' => 'Check Google Search Console connection status. Returns whether GSC is connected, the selected property, the list of available properties (verified sites the connected Google account owns), and the OAuth URL if not connected. ALWAYS call this first before other gsc_* tools. Requires Pro.',
+      'category' => 'SEO Engine',
+      'accessLevel' => 'read',
+      'inputSchema' => [ 'type' => 'object' ]
+    ];
+
+    $tools[] = [
+      'name' => 'mwseo_gsc_quick_wins',
+      'description' => 'THE high-leverage SEO tool: returns categorized, actionable opportunities with concrete payoff estimates and one-button-away next steps. Three categories: 🎯 Close to first page (posts ranking #5 to #15 with strong impressions: small lift, big traffic gain), 💡 Title & meta opportunities (high impressions but low CTR: the title or description isn\'t compelling clicks), 💎 Hidden gems (great CTR but few impressions: these posts convert when seen). Each opportunity includes the recommended action, the next MCP tool to run, and an estimated click lift. Requires Pro and a connected GSC property.',
+      'category' => 'SEO Engine',
+      'accessLevel' => 'read',
+      'inputSchema' => [
+        'type' => 'object',
+        'properties' => [
+          'days' => [
+            'type' => 'integer',
+            'description' => 'Lookback window in days. Default 28, max 90.',
+            'default' => 28
+          ],
+          'min_impressions' => [
+            'type' => 'integer',
+            'description' => 'Ignore queries with fewer impressions than this in the period (noise filter). Default 50.',
+            'default' => 50
+          ],
+          'limit_per_category' => [
+            'type' => 'integer',
+            'description' => 'Maximum opportunities returned per category. Default 5, max 50.',
+            'default' => 5
+          ],
+          'property' => [
+            'type' => 'string',
+            'description' => 'Optional. Override the active Search Console property (use the siteUrl from mwseo_gsc_status). Use this for multi-domain Polylang/WPML setups to query a specific language site.'
+          ]
+        ]
+      ]
+    ];
+
+    $tools[] = [
+      'name' => 'mwseo_gsc_site_pulse',
+      'description' => 'Site-level Search Console pulse: returns total clicks, impressions, average position, and CTR for the property over the period, plus period-over-period deltas. The "is the site growing?" answer in one call. Same trend shape as mwseo_gsc_post_pulse but at the site level. Requires Pro and a connected GSC property.',
+      'category' => 'SEO Engine',
+      'accessLevel' => 'read',
+      'inputSchema' => [
+        'type' => 'object',
+        'properties' => [
+          'days' => [
+            'type' => 'integer',
+            'description' => 'Period length in days. The prior comparison period is the same length immediately before. Default 28.',
+            'default' => 28
+          ],
+          'property' => [
+            'type' => 'string',
+            'description' => 'Optional. Override the active property (siteUrl). For multi-domain setups.'
+          ]
+        ]
+      ]
+    ];
+
+    $tools[] = [
+      'name' => 'mwseo_gsc_weekly_digest',
+      'description' => 'One-call snapshot of a property: site totals + period-over-period trends, the top opportunity in each Quick Wins category, the pages that moved the most in clicks, and search queries that entered the data this period. Designed as the entry point for a weekly /pulse workflow — composes site_pulse + quick_wins + movers + new-query analysis into a single call. Requires Pro and a connected GSC property.',
+      'category' => 'SEO Engine',
+      'accessLevel' => 'read',
+      'inputSchema' => [
+        'type' => 'object',
+        'properties' => [
+          'days' => [
+            'type' => 'integer',
+            'description' => 'Period length in days. The prior comparison period is the same length immediately before. Default 7 (one week).',
+            'default' => 7
+          ],
+          'property' => [
+            'type' => 'string',
+            'description' => 'Optional. Override the active property (siteUrl). For multi-domain setups.'
+          ]
+        ]
+      ]
+    ];
+
+    $tools[] = [
+      'name' => 'mwseo_gsc_post_pulse',
+      'description' => 'Per-post Search Console pulse: returns a one-line human headline ("This post has X impressions/month, ranking #N on average, clicks up Y%"), top queries the post ranks for, and trend comparisons (clicks/impressions/position) vs. the previous period. Designed for the "what\'s happening with my post" moment. Requires Pro and a connected GSC property.',
+      'category' => 'SEO Engine',
+      'accessLevel' => 'read',
+      'inputSchema' => [
+        'type' => 'object',
+        'properties' => [
+          'post_id' => [
+            'type' => 'integer',
+            'description' => 'The WordPress post ID to inspect.'
+          ],
+          'days' => [
+            'type' => 'integer',
+            'description' => 'Current period length in days (the prior comparison period is the same length immediately before). Default 28.',
+            'default' => 28
+          ],
+          'property' => [
+            'type' => 'string',
+            'description' => 'Optional. Override the active Search Console property (siteUrl). For multi-domain setups.'
+          ],
+          'debug' => [
+            'type' => 'boolean',
+            'description' => 'Optional. If true, include a _debug block in the response (code version + actual date windows queried). For verifying deployments and diagnosing empty-period issues.',
+            'default' => false
+          ]
+        ],
+        'required' => [ 'post_id' ]
+      ]
+    ];
+
+    $tools[] = [
+      'name' => 'mwseo_gsc_top_queries',
+      'description' => 'Top search queries from Google Search Console, optionally scoped to a single page URL or country. Returns query, clicks, impressions, CTR, and average position. Use this for free-form exploration; use mwseo_gsc_quick_wins for actionable opportunities. Requires Pro and a connected GSC property.',
+      'category' => 'SEO Engine',
+      'accessLevel' => 'read',
+      'inputSchema' => [
+        'type' => 'object',
+        'properties' => [
+          'days' => [ 'type' => 'integer', 'description' => 'Lookback window in days. Default 28.', 'default' => 28 ],
+          'limit' => [ 'type' => 'integer', 'description' => 'Max queries to return. Default 25, max 1000.', 'default' => 25 ],
+          'page_url' => [ 'type' => 'string', 'description' => 'Optional. Full URL of a single page to scope the queries to.' ],
+          'country' => [ 'type' => 'string', 'description' => 'Optional. ISO 3-letter country code (e.g. "usa", "fra", "jpn").' ],
+          'property' => [ 'type' => 'string', 'description' => 'Optional. Override the active Search Console property (siteUrl). For multi-domain setups.' ]
+        ]
+      ]
+    ];
+
+    $tools[] = [
+      'name' => 'mwseo_gsc_top_pages',
+      'description' => 'Top pages by clicks from Google Search Console. Returns each page URL with clicks, impressions, CTR, average position, and the matched WP post_id/title where the URL resolves to a known post. Requires Pro and a connected GSC property.',
+      'category' => 'SEO Engine',
+      'accessLevel' => 'read',
+      'inputSchema' => [
+        'type' => 'object',
+        'properties' => [
+          'days' => [ 'type' => 'integer', 'description' => 'Lookback window in days. Default 28.', 'default' => 28 ],
+          'limit' => [ 'type' => 'integer', 'description' => 'Max pages to return. Default 25, max 1000.', 'default' => 25 ],
+          'property' => [ 'type' => 'string', 'description' => 'Optional. Override the active Search Console property (siteUrl). For multi-domain setups.' ]
+        ]
+      ]
+    ];
+
+    $tools[] = [
+      'name' => 'mwseo_gsc_set_property',
+      'description' => 'Set the active Google Search Console property to query. Use mwseo_gsc_status first to see available properties. The property is a verified site URL like "https://example.com/" or "sc-domain:example.com". Requires Pro and GSC connected.',
+      'category' => 'SEO Engine',
+      'accessLevel' => 'write',
+      'inputSchema' => [
+        'type' => 'object',
+        'properties' => [
+          'property' => [ 'type' => 'string', 'description' => 'The siteUrl from mwseo_gsc_status available_properties.' ]
+        ],
+        'required' => [ 'property' ]
       ]
     ];
 
@@ -1131,16 +1417,36 @@ class Meow_MWSEO_MCP {
           return [ 'success' => true, 'data' => $results ];
 
         case 'mwseo_search_posts':
-          $query_args = [
-            's' => $args['search_term'],
-            'post_type' => !empty($args['post_type']) ? $args['post_type'] : ['post', 'page'],
-            'posts_per_page' => $args['limit'] ?? 20
-          ];
-          
-          $posts = get_posts( $query_args );
+          // Empty search_term silently returned recent posts via get_posts('s'=>'').
+          // Validate input and run a direct LIKE query for predictable matching.
+          $search_term = isset( $args['search_term'] ) ? trim( (string) $args['search_term'] ) : '';
+          if ( $search_term === '' ) {
+            return [ 'success' => false, 'error' => 'search_term is required and cannot be empty' ];
+          }
+
+          $limit = isset( $args['limit'] ) ? max( 1, min( 100, (int) $args['limit'] ) ) : 20;
+          $post_types = !empty( $args['post_type'] ) ? (array) $args['post_type'] : [ 'post', 'page' ];
+
+          global $wpdb;
+          $like = '%' . $wpdb->esc_like( $search_term ) . '%';
+          $type_placeholders = implode( ',', array_fill( 0, count( $post_types ), '%s' ) );
+
+          $sql = "SELECT ID FROM {$wpdb->posts}
+            WHERE post_status = 'publish'
+              AND post_type IN ($type_placeholders)
+              AND ( post_title LIKE %s OR post_content LIKE %s OR post_excerpt LIKE %s )
+            ORDER BY
+              CASE WHEN post_title LIKE %s THEN 0 ELSE 1 END,
+              post_date DESC
+            LIMIT %d";
+
+          $params = array_merge( $post_types, [ $like, $like, $like, $like, $limit ] );
+          $post_ids = $wpdb->get_col( $wpdb->prepare( $sql, $params ) );
+
           $results = [];
-          
-          foreach ( $posts as $post ) {
+          foreach ( $post_ids as $post_id ) {
+            $post = get_post( $post_id );
+            if ( !$post ) continue;
             $results[] = [
               'post_id' => $post->ID,
               'post_title' => $post->post_title,
@@ -1149,7 +1455,7 @@ class Meow_MWSEO_MCP {
               'seo_score' => get_post_meta( $post->ID, '_mwseo_score', true ) ?: null
             ];
           }
-          
+
           return [ 'success' => true, 'data' => $results ];
           
         case 'mwseo_get_recent_posts':
@@ -1429,45 +1735,493 @@ class Meow_MWSEO_MCP {
 
         // Magic Fix / Issues
         case 'mwseo_get_issues':
-          $post = get_post( $args['post_id'] );
-          if ( !$post ) {
-            return [ 'success' => false, 'error' => 'Post not found' ];
-          }
+          // Per-post mode
+          if ( !empty( $args['post_id'] ) ) {
+            $post = get_post( $args['post_id'] );
+            if ( !$post ) {
+              return [ 'success' => false, 'error' => 'Post not found' ];
+            }
 
-          // Get the full analysis data
-          $analysis = get_post_meta( $post->ID, '_mwseo_analysis', true );
-          $codes = get_post_meta( $post->ID, '_mwseo_codes', true );
+            $analysis = get_post_meta( $post->ID, '_mwseo_analysis', true );
+            $codes = get_post_meta( $post->ID, '_mwseo_codes', true );
 
-          if ( !$analysis || !isset( $analysis['tests'] ) ) {
+            if ( !$analysis || !isset( $analysis['tests'] ) ) {
+              return [
+                'success' => false,
+                'error' => 'No analysis found for this post. Run mwseo_do_seo_scan first.'
+              ];
+            }
+
+            $issues = [];
+            foreach ( $analysis['tests'] as $test_name => $score ) {
+              if ( $score === 'NA' ) continue;
+              if ( $score < 70 ) {
+                $issues[] = [
+                  'test' => $test_name,
+                  'score' => $score,
+                  'severity' => $score < 40 ? 'high' : 'medium'
+                ];
+              }
+            }
+
             return [
-              'success' => false,
-              'error' => 'No analysis found for this post. Run mwseo_do_seo_scan first.'
+              'success' => true,
+              'data' => [
+                'post_id' => $post->ID,
+                'overall_score' => $analysis['overall'] ?? 0,
+                'issues' => $issues,
+                'codes' => $codes ?: []
+              ]
             ];
           }
 
-          // Build issues list
-          $issues = [];
-          foreach ( $analysis['tests'] as $test_name => $score ) {
-            if ( $score === 'NA' ) continue;
+          // Site-wide aggregate mode
+          $sample_size = isset( $args['sample_size'] ) ? max( 100, min( 50000, (int) $args['sample_size'] ) ) : 5000;
 
-            if ( $score < 70 ) {
-              $issues[] = [
-                'test' => $test_name,
-                'score' => $score,
-                'severity' => $score < 40 ? 'high' : ( $score < 70 ? 'medium' : 'low' )
-              ];
+          global $wpdb;
+          $rows = $wpdb->get_results( $wpdb->prepare(
+            "SELECT post_id, meta_value FROM {$wpdb->postmeta}
+             WHERE meta_key = '_mwseo_analysis' LIMIT %d",
+            $sample_size
+          ) );
+
+          $test_failures = [];
+          $posts_scanned = 0;
+          $posts_with_issues = 0;
+
+          foreach ( $rows as $row ) {
+            $analysis = maybe_unserialize( $row->meta_value );
+            if ( !is_array( $analysis ) || !isset( $analysis['tests'] ) ) continue;
+
+            $posts_scanned++;
+            $had_issue = false;
+
+            foreach ( $analysis['tests'] as $test_name => $score ) {
+              if ( $score === 'NA' || $score >= 70 ) continue;
+              $had_issue = true;
+              $severity = $score < 40 ? 'high' : 'medium';
+
+              if ( !isset( $test_failures[ $test_name ] ) ) {
+                $test_failures[ $test_name ] = [
+                  'test' => $test_name,
+                  'count' => 0,
+                  'high' => 0,
+                  'medium' => 0,
+                  'sample_post_ids' => []
+                ];
+              }
+              $test_failures[ $test_name ]['count']++;
+              $test_failures[ $test_name ][ $severity ]++;
+              if ( count( $test_failures[ $test_name ]['sample_post_ids'] ) < 5 ) {
+                $test_failures[ $test_name ]['sample_post_ids'][] = (int) $row->post_id;
+              }
             }
+
+            if ( $had_issue ) $posts_with_issues++;
+          }
+
+          usort( $test_failures, function( $a, $b ) { return $b['count'] - $a['count']; } );
+
+          return [
+            'success' => true,
+            'data' => [
+              'posts_scanned' => $posts_scanned,
+              'posts_with_issues' => $posts_with_issues,
+              'sample_size' => $sample_size,
+              'top_failing_tests' => array_values( $test_failures )
+            ]
+          ];
+
+        case 'mwseo_get_orphan_pages':
+          $post_type = !empty( $args['post_type'] ) ? (array) $args['post_type'] : [ 'post' ];
+          $lang = isset( $args['lang'] ) ? (string) $args['lang'] : '';
+          $created_after = isset( $args['created_after'] ) ? (string) $args['created_after'] : '';
+          $min_word_count = isset( $args['min_word_count'] ) ? max( 0, (int) $args['min_word_count'] ) : 300;
+          $limit = isset( $args['limit'] ) ? max( 1, min( 500, (int) $args['limit'] ) ) : 50;
+          $scan_limit = 2000;
+
+          $query_args = [
+            'post_type' => $post_type,
+            'post_status' => 'publish',
+            'posts_per_page' => $scan_limit,
+            'orderby' => 'date',
+            'order' => 'DESC',
+          ];
+          if ( $created_after !== '' ) {
+            $query_args['date_query'] = [ [ 'after' => $created_after, 'inclusive' => true ] ];
+          }
+          if ( $lang !== '' && function_exists( 'pll_get_post_language' ) ) {
+            $query_args['lang'] = $lang;
+          }
+
+          $candidates = get_posts( $query_args );
+          $orphans = [];
+          $scanned = 0;
+
+          global $wpdb;
+          foreach ( $candidates as $candidate ) {
+            $scanned++;
+
+            $stripped = strip_tags( $candidate->post_content );
+            $word_count = str_word_count( $stripped );
+            if ( $word_count === 0 && mb_strlen( $stripped ) > 0 ) {
+              // CJK / non-Latin fallback: rough proxy via character count.
+              $word_count = (int) ( mb_strlen( $stripped ) / 2 );
+            }
+            if ( $word_count < $min_word_count ) continue;
+
+            // Approximate inbound count via slug substring match. Over-counts
+            // mentions vs. real links, which means we may miss some orphans
+            // (false negatives) — the safer error direction than false positives.
+            if ( empty( $candidate->post_name ) ) continue;
+            $like_slug = '%' . $wpdb->esc_like( '/' . $candidate->post_name . '/' ) . '%';
+            $inbound = (int) $wpdb->get_var( $wpdb->prepare(
+              "SELECT COUNT(*) FROM {$wpdb->posts}
+                WHERE post_status = 'publish' AND ID != %d AND post_content LIKE %s",
+              $candidate->ID, $like_slug
+            ) );
+
+            if ( $inbound > 0 ) continue;
+
+            $orphans[] = [
+              'post_id' => $candidate->ID,
+              'post_title' => $candidate->post_title,
+              'permalink' => get_permalink( $candidate ),
+              'post_type' => $candidate->post_type,
+              'post_date' => $candidate->post_date,
+              'word_count' => $word_count,
+            ];
+          }
+
+          usort( $orphans, function( $a, $b ) { return $b['word_count'] - $a['word_count']; } );
+          $orphans = array_slice( $orphans, 0, $limit );
+
+          return [
+            'success' => true,
+            'data' => [
+              'scanned' => $scanned,
+              'scan_limit' => $scan_limit,
+              'truncated' => $scanned >= $scan_limit,
+              'orphans' => $orphans,
+            ]
+          ];
+
+        case 'mwseo_suggest_internal_links':
+          if ( !$this->core->pro || !$this->core->pro->magic_fix ) {
+            return [ 'success' => false, 'error' => 'Magic Fix is not available (Pro required).' ];
+          }
+
+          // Resolve to a post-like object: either a real WP_Post or a pseudo-post for drafts.
+          $is_draft = false;
+          if ( !empty( $args['post_id'] ) ) {
+            $post = get_post( $args['post_id'] );
+            if ( !$post ) {
+              return [ 'success' => false, 'error' => 'Post not found' ];
+            }
+          } else if ( !empty( $args['draft_content'] ) && is_array( $args['draft_content'] ) ) {
+            $draft = $args['draft_content'];
+            if ( empty( $draft['title'] ) || empty( $draft['content'] ) ) {
+              return [ 'success' => false, 'error' => 'draft_content requires both title and content.' ];
+            }
+            // Pseudo-post: ID=0 makes step2 skip category/tag lookups and fall through to
+            // pure keyword search, which is the right behavior for an unpublished draft.
+            $post = new stdClass();
+            $post->ID = 0;
+            $post->post_title = (string) $draft['title'];
+            $post->post_content = (string) $draft['content'];
+            $post->post_excerpt = '';
+            $post->post_type = !empty( $draft['post_type'] ) ? (string) $draft['post_type'] : 'post';
+            $is_draft = true;
+          } else {
+            return [ 'success' => false, 'error' => 'Either post_id or draft_content is required.' ];
+          }
+
+          $max_candidates = isset( $args['max_candidates'] ) ? max( 1, min( 10, (int) $args['max_candidates'] ) ) : 10;
+          $magic = $this->core->pro->magic_fix;
+
+          // Steps 1-3 only. Step 4 (placement generation) is sequential AI calls
+          // that easily blow past MCP timeouts; call mwseo_generate_internal_link_placements
+          // per chosen target instead.
+          $keywords = $magic->internal_links_step1( $post );
+          $candidates = $magic->internal_links_step2( $post, $keywords );
+          $selected_ids = $magic->internal_links_step3( $post, $candidates );
+
+          $suggestions = [];
+          $processed = 0;
+          foreach ( $selected_ids as $target_id ) {
+            if ( $processed >= $max_candidates ) break;
+
+            $target_post = get_post( (int) $target_id );
+            if ( !$target_post ) continue;
+
+            $context = $magic->extract_candidate_context( $target_post, $keywords );
+
+            $suggestions[] = [
+              'post_id' => $target_post->ID,
+              'post_title' => $target_post->post_title,
+              'post_url' => get_permalink( $target_post ),
+              'context_excerpt' => $context,
+            ];
+            $processed++;
           }
 
           return [
             'success' => true,
             'data' => [
-              'post_id' => $post->ID,
-              'overall_score' => $analysis['overall'] ?? 0,
-              'issues' => $issues,
-              'codes' => $codes ?: []
+              'mode' => $is_draft ? 'draft' : 'post',
+              'keywords' => $keywords,
+              'candidates_considered' => count( $candidates ),
+              'suggestions' => $suggestions,
+              'next_step' => 'For each promising candidate, call mwseo_generate_internal_link_placements with target_post_id=<candidate post_id> to get placement suggestions.'
             ]
           ];
+
+        case 'mwseo_suggest_seo_title': {
+          if ( empty( $args['post_id'] ) ) {
+            return [ 'success' => false, 'error' => 'post_id is required.' ];
+          }
+          $post = get_post( (int) $args['post_id'] );
+          if ( !$post ) {
+            return [ 'success' => false, 'error' => 'Post not found.' ];
+          }
+          global $mwai;
+          if ( !$mwai ) {
+            return [ 'success' => false, 'error' => 'AI Engine is not available.' ];
+          }
+
+          $count = isset( $args['count'] ) ? max( 1, min( 10, (int) $args['count'] ) ) : 3;
+          $target_query = !empty( $args['target_query'] ) ? trim( (string) $args['target_query'] ) : '';
+          $current_title = get_post_meta( $post->ID, $this->core->meta_key_seo_title, true ) ?: $post->post_title;
+          $language = $this->core->get_post_language_name( $post->ID );
+          $excerpt = wp_trim_words( strip_tags( $post->post_content ), 60 );
+
+          $query_line = $target_query !== ''
+            ? sprintf( 'The page should rank for: "%s". Include this phrasing naturally where it fits.', $target_query )
+            : '';
+
+          $prompt = sprintf(
+            "Write %d distinct, compelling SEO title candidates for the post below. Titles must:\n" .
+            "- Be 30 to 70 characters\n" .
+            "- Be specific and click-worthy (no clickbait, no all-caps)\n" .
+            "- Avoid emoji and trailing punctuation\n" .
+            "%s\n" .
+            "\nCurrent title: %s\nPost content sample: %s\n\nReturn ONLY a JSON array of strings, nothing else.",
+            $count, $query_line, $current_title, $excerpt
+          );
+          $prompt = sprintf( '<instructions>Reply ONLY with a JSON array of %d title strings in %s. No other text, no markdown fences.</instructions> <prompt>%s</prompt>', $count, $language, $prompt );
+
+          $raw = $mwai->simpleTextQuery( $prompt, [ 'scope' => 'seo' ] );
+          $raw = trim( (string) $raw );
+          $raw = preg_replace( '/^```(json)?\s*/m', '', $raw );
+          $raw = preg_replace( '/```\s*$/m', '', $raw );
+          $candidates = json_decode( trim( $raw ), true );
+          if ( !is_array( $candidates ) ) {
+            return [ 'success' => false, 'error' => 'AI returned an unparseable response.', '_raw' => substr( $raw, 0, 200 ) ];
+          }
+          $candidates = array_values( array_filter( array_map( 'trim', array_map( 'strval', $candidates ) ) ) );
+          $candidates = array_slice( $candidates, 0, $count );
+
+          return [
+            'success' => true,
+            'data' => [
+              'post_id' => $post->ID,
+              'current_title' => $current_title,
+              'candidates' => $candidates,
+              'next_step' => sprintf( 'Pick a candidate and apply it with mwseo_set_seo_title post_id=%d title="<chosen>".', $post->ID )
+            ]
+          ];
+        }
+
+        case 'mwseo_generate_internal_link_placements':
+          if ( !$this->core->pro || !$this->core->pro->magic_fix ) {
+            return [ 'success' => false, 'error' => 'Magic Fix is not available (Pro required).' ];
+          }
+          if ( empty( $args['target_post_id'] ) ) {
+            return [ 'success' => false, 'error' => 'target_post_id is required.' ];
+          }
+          $target_post = get_post( (int) $args['target_post_id'] );
+          if ( !$target_post ) {
+            return [ 'success' => false, 'error' => 'Target post not found.' ];
+          }
+
+          // Resolve source: real post or draft pseudo-post
+          if ( !empty( $args['post_id'] ) ) {
+            $source = get_post( $args['post_id'] );
+            if ( !$source ) {
+              return [ 'success' => false, 'error' => 'Source post not found.' ];
+            }
+          } else if ( !empty( $args['draft_content'] ) && is_array( $args['draft_content'] ) ) {
+            $draft = $args['draft_content'];
+            if ( empty( $draft['title'] ) || empty( $draft['content'] ) ) {
+              return [ 'success' => false, 'error' => 'draft_content requires both title and content.' ];
+            }
+            $source = new stdClass();
+            $source->ID = 0;
+            $source->post_title = (string) $draft['title'];
+            $source->post_content = (string) $draft['content'];
+            $source->post_excerpt = '';
+            $source->post_type = !empty( $draft['post_type'] ) ? (string) $draft['post_type'] : 'post';
+          } else {
+            return [ 'success' => false, 'error' => 'Either post_id or draft_content is required.' ];
+          }
+
+          $result = $this->core->pro->magic_fix->internal_links_step4( $source, $target_post );
+          return [
+            'success' => true,
+            'data' => is_array( $result ) ? $result : [
+              'post_id' => $target_post->ID,
+              'post_title' => $target_post->post_title,
+              'post_url' => get_permalink( $target_post ),
+              'options' => [],
+              'note' => 'No natural placement found.'
+            ]
+          ];
+
+        // Google Search Console (Pro)
+        case 'mwseo_gsc_status': {
+          if ( !$this->core->pro || !$this->core->pro->search_console ) {
+            return [ 'success' => false, 'error' => 'Search Console module is not available (Pro required).' ];
+          }
+          $gsc = $this->core->pro->search_console;
+          $client_id = $this->core->get_option( 'google_analytics_client_id', '' );
+          $client_secret = $this->core->get_option( 'google_analytics_client_secret', '' );
+
+          if ( empty( $client_id ) || empty( $client_secret ) ) {
+            return [
+              'success' => true,
+              'connected' => false,
+              'summary' => '⚠️ Google OAuth credentials are not configured. Set google_analytics_client_id and google_analytics_client_secret in Settings. Those credentials are shared with Google Search Console.',
+              'next_step' => 'Open Settings → Analytics → set Client ID and Client Secret from your Google Cloud Console OAuth client.'
+            ];
+          }
+
+          if ( !$gsc->is_authenticated() ) {
+            return [
+              'success' => true,
+              'connected' => false,
+              'summary' => '⚠️ Not yet connected to Google Search Console. Open the authorization URL below in a browser, sign in, and authorize.',
+              'auth_url' => $gsc->get_auth_url(),
+              'next_step' => 'Open auth_url in a browser, authorize, then call mwseo_gsc_status again.'
+            ];
+          }
+
+          $properties = $gsc->list_properties();
+          $current_property = $gsc->get_property();
+
+          if ( empty( $current_property ) ) {
+            $suggestion = !empty( $properties ) ? $properties[0]['site_url'] : null;
+            $summary = $suggestion
+              ? sprintf( '🟡 Connected, but no property selected yet. Suggested: %s. Call mwseo_gsc_set_property to choose.', $suggestion )
+              : '🟡 Connected, but no verified properties were returned by Google. Make sure your Google account owns at least one verified Search Console property.';
+            return [
+              'success' => true,
+              'connected' => true,
+              'property' => null,
+              'available_properties' => $properties ?: [],
+              'summary' => $summary,
+              'next_step' => $suggestion ? "Call mwseo_gsc_set_property with property=\"$suggestion\"." : null
+            ];
+          }
+
+          return [
+            'success' => true,
+            'connected' => true,
+            'property' => $current_property,
+            'available_properties' => $properties ?: [],
+            'summary' => sprintf( '✅ Connected to %s. Run mwseo_gsc_quick_wins for ranked opportunities, mwseo_gsc_top_pages or mwseo_gsc_top_queries for exploration, or mwseo_gsc_post_pulse on any post_id.', $current_property )
+          ];
+        }
+
+        case 'mwseo_gsc_set_property': {
+          if ( !$this->core->pro || !$this->core->pro->search_console ) {
+            return [ 'success' => false, 'error' => 'Search Console module is not available (Pro required).' ];
+          }
+          if ( empty( $args['property'] ) ) {
+            return [ 'success' => false, 'error' => 'property is required.' ];
+          }
+          $this->core->pro->search_console->set_property( (string) $args['property'] );
+          return [
+            'success' => true,
+            'property' => (string) $args['property'],
+            'summary' => sprintf( '✅ Active property set to %s.', $args['property'] )
+          ];
+        }
+
+        case 'mwseo_gsc_quick_wins': {
+          if ( !$this->core->pro || !$this->core->pro->search_console ) {
+            return [ 'success' => false, 'error' => 'Search Console module is not available (Pro required).' ];
+          }
+          $gsc = $this->core->pro->search_console;
+          if ( !$gsc->is_authenticated() || ( !$gsc->get_property() && empty( $args['property'] ) ) ) {
+            return [ 'success' => false, 'error' => 'Not connected to Google Search Console, or no property set. Run mwseo_gsc_status first, or pass a property argument.' ];
+          }
+          return $gsc->get_quick_wins( $args );
+        }
+
+        case 'mwseo_gsc_site_pulse': {
+          if ( !$this->core->pro || !$this->core->pro->search_console ) {
+            return [ 'success' => false, 'error' => 'Search Console module is not available (Pro required).' ];
+          }
+          $gsc = $this->core->pro->search_console;
+          if ( !$gsc->is_authenticated() || ( !$gsc->get_property() && empty( $args['property'] ) ) ) {
+            return [ 'success' => false, 'error' => 'Not connected to Google Search Console, or no property set. Run mwseo_gsc_status first, or pass a property argument.' ];
+          }
+          return [ 'success' => true, 'data' => $gsc->get_summary( $args ) ];
+        }
+
+        case 'mwseo_gsc_weekly_digest': {
+          if ( !$this->core->pro || !$this->core->pro->search_console ) {
+            return [ 'success' => false, 'error' => 'Search Console module is not available (Pro required).' ];
+          }
+          $gsc = $this->core->pro->search_console;
+          if ( !$gsc->is_authenticated() || ( !$gsc->get_property() && empty( $args['property'] ) ) ) {
+            return [ 'success' => false, 'error' => 'Not connected to Google Search Console, or no property set. Run mwseo_gsc_status first, or pass a property argument.' ];
+          }
+          return $gsc->get_weekly_digest( $args );
+        }
+
+        case 'mwseo_gsc_post_pulse': {
+          if ( !$this->core->pro || !$this->core->pro->search_console ) {
+            return [ 'success' => false, 'error' => 'Search Console module is not available (Pro required).' ];
+          }
+          if ( empty( $args['post_id'] ) ) {
+            return [ 'success' => false, 'error' => 'post_id is required.' ];
+          }
+          $gsc = $this->core->pro->search_console;
+          if ( !$gsc->is_authenticated() || ( !$gsc->get_property() && empty( $args['property'] ) ) ) {
+            return [ 'success' => false, 'error' => 'Not connected to Google Search Console, or no property set. Run mwseo_gsc_status first, or pass a property argument.' ];
+          }
+          $days = isset( $args['days'] ) ? max( 7, min( 90, (int) $args['days'] ) ) : 28;
+          $property = !empty( $args['property'] ) ? (string) $args['property'] : null;
+          $debug = !empty( $args['debug'] );
+          $result = $gsc->get_post_pulse( (int) $args['post_id'], $days, $property, $debug );
+          if ( $result === false ) {
+            return [ 'success' => false, 'error' => $gsc->get_last_error() ?: 'Unknown error' ];
+          }
+          return [ 'success' => true, 'data' => $result ];
+        }
+
+        case 'mwseo_gsc_top_queries': {
+          if ( !$this->core->pro || !$this->core->pro->search_console ) {
+            return [ 'success' => false, 'error' => 'Search Console module is not available (Pro required).' ];
+          }
+          $gsc = $this->core->pro->search_console;
+          if ( !$gsc->is_authenticated() || ( !$gsc->get_property() && empty( $args['property'] ) ) ) {
+            return [ 'success' => false, 'error' => 'Not connected to Google Search Console, or no property set. Run mwseo_gsc_status first, or pass a property argument.' ];
+          }
+          return [ 'success' => true, 'data' => $gsc->get_top_queries( $args ) ];
+        }
+
+        case 'mwseo_gsc_top_pages': {
+          if ( !$this->core->pro || !$this->core->pro->search_console ) {
+            return [ 'success' => false, 'error' => 'Search Console module is not available (Pro required).' ];
+          }
+          $gsc = $this->core->pro->search_console;
+          if ( !$gsc->is_authenticated() || ( !$gsc->get_property() && empty( $args['property'] ) ) ) {
+            return [ 'success' => false, 'error' => 'Not connected to Google Search Console, or no property set. Run mwseo_gsc_status first, or pass a property argument.' ];
+          }
+          return [ 'success' => true, 'data' => $gsc->get_top_pages( $args ) ];
+        }
 
         // Post Management
         case 'mwseo_skip_post':

@@ -87,7 +87,10 @@ class Meow_MWSEO_Admin extends MeowKit_MWSEO_Admin {
 			echo '<meta property="og:description" content="' . esc_attr($excerpt) . '">';
 			echo '<meta property="og:image" content="' . esc_url($featured_image) . '">';
 			echo '<meta property="og:image:alt" content="' . esc_attr($featured_image_alt) . '">';
-			echo '<meta property="og:type" content="article">';
+			// Homepage (whether "Latest posts" or a static page in Settings → Reading) is
+			// a "website" per OG spec; only single posts/pages get "article".
+			$og_type = is_front_page() ? 'website' : 'article';
+			echo '<meta property="og:type" content="' . esc_attr( $og_type ) . '">';
 			echo '<meta property="og:locale" content="' . esc_attr(get_locale()) . '">';
 			echo '<meta property="og:locale:alternate" content="' . esc_attr(get_locale()) . '">';
 			echo '<meta property="og:site" content="' . esc_url($site_url) . '">';
@@ -157,6 +160,7 @@ class Meow_MWSEO_Admin extends MeowKit_MWSEO_Admin {
 			'site_name' => get_bloginfo('name'),
 			'options' => $this->core->sanitized_options(),
 			'google_analytics' => $this->core->get_google_analytics_state(),
+			'google_search_console' => $this->core->get_google_search_console_state(),
 			'blog_name' => trim( get_bloginfo( 'name' ) ),
 			'active_seo_plugins' => [
 				'yoast'      => class_exists( 'WPSEO_Frontend' ),

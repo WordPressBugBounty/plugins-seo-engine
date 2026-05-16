@@ -1122,7 +1122,18 @@ class Meow_MWSEO_Core
 			'google_analytics_track_logged_users' => false,
 			'google_analytics_track_power_users' => false,
 			'google_analytics_tracking_disabled' => false,
-			
+
+			// Search Console module (Pro). When enabled, surfaces its own tab in
+			// the admin with quick wins, top queries/pages, and post pulse — pulling
+			// real Google search data. Reuses google_analytics_client_id/secret since
+			// a single GCP OAuth client can grant tokens for multiple Google APIs.
+			// `property` is the default for site-wide tools; `properties` is the set
+			// of all GSC properties belonging to this WP install (Polylang/WPML
+			// multi-domain). Per-post tools auto-pick from `properties` by URL match.
+			'search_console' => false,
+			'google_search_console_property' => '',
+			'google_search_console_properties' => [],
+
 			// AI Features
 			'mwai_has_ai' => false,
 			'mwai_has_mcp' => false,
@@ -2109,9 +2120,93 @@ class Meow_MWSEO_Core
 		if ( !isset( $this->googleanalytics_module ) ) {
 			return '';
 		}
-		
+
 		return $this->googleanalytics_module->get_redirect_url();
 	}
+
+	#endregion
+
+	#region Google Search Console
+
+	function get_google_search_console_state() {
+		if ( !$this->pro || !$this->pro->search_console ) {
+			return [];
+		}
+		$gsc = $this->pro->search_console;
+		return [
+			'redirect_url' => $gsc->get_redirect_url(),
+			'property' => $gsc->get_property(),
+			'tracked' => $gsc->get_tracked_properties(),
+			'is_authenticated' => $gsc->is_authenticated(),
+		];
+	}
+
+	function toggle_gsc_tracked_property( $property, $tracked ) {
+		if ( !$this->pro || !$this->pro->search_console ) {
+			return false;
+		}
+		return $this->pro->search_console->toggle_tracked_property( $property, $tracked );
+	}
+
+	function get_gsc_summary( $args = [] ) {
+		if ( !$this->pro || !$this->pro->search_console ) return [];
+		return $this->pro->search_console->get_summary( $args );
+	}
+
+	function get_gsc_quick_wins( $args = [] ) {
+		if ( !$this->pro || !$this->pro->search_console ) return [];
+		return $this->pro->search_console->get_quick_wins( $args );
+	}
+
+	function get_gsc_top_pages( $args = [] ) {
+		if ( !$this->pro || !$this->pro->search_console ) return [];
+		return $this->pro->search_console->get_top_pages( $args );
+	}
+
+	function get_gsc_top_queries( $args = [] ) {
+		if ( !$this->pro || !$this->pro->search_console ) return [];
+		return $this->pro->search_console->get_top_queries( $args );
+	}
+
+	function get_gsc_auth_url() {
+		if ( !$this->pro || !$this->pro->search_console ) {
+			return '';
+		}
+		$this->pro->search_console->init();
+		return $this->pro->search_console->get_auth_url();
+	}
+
+	function is_gsc_authenticated() {
+		if ( !$this->pro || !$this->pro->search_console ) {
+			return false;
+		}
+		$this->pro->search_console->init();
+		return $this->pro->search_console->is_authenticated();
+	}
+
+	function unlink_gsc() {
+		if ( !$this->pro || !$this->pro->search_console ) {
+			return false;
+		}
+		return $this->pro->search_console->unlink();
+	}
+
+	function list_gsc_properties() {
+		if ( !$this->pro || !$this->pro->search_console ) {
+			return [];
+		}
+		$properties = $this->pro->search_console->list_properties();
+		return is_array( $properties ) ? $properties : [];
+	}
+
+	function set_gsc_property( $property ) {
+		if ( !$this->pro || !$this->pro->search_console ) {
+			return false;
+		}
+		return $this->pro->search_console->set_property( $property );
+	}
+
+	#endregion
 
 	// TODO [2025]: Refactor to unified analytics provider interface
 	function get_google_analytics_data( $args = array() ) {

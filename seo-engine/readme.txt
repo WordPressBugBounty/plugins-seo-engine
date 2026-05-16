@@ -4,7 +4,7 @@ Tags: seo, redirection, sitemap, schema, analytics
 Donate link: https://www.patreon.com/meowapps
 Requires at least: 6.0
 Tested up to: 6.9
-Stable tag: 0.7.0
+Stable tag: 0.7.1
 Requires PHP: 7.4
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
@@ -26,6 +26,9 @@ Analyze and optimize your content with AI-powered insights. Get real-time scores
 
 🛠️ **Technical SEO**
 All the SEO basics, straight to the point. No endless settings for features you don't need—just what actually matters.
+
+🪄 **Magic Fix**
+Detected issues come with a quiet "fix" affordance — AI generates a concrete suggestion, you review it, you apply it. Internal links, ALT text, grammar, titles, excerpts, featured images. No bulk "fix everything" that rewrites your site behind your back.
 
 🚦 **Redirections & 404**
 A clean redirect manager paired with a 404 monitor. Spot broken links, convert any 404 into a redirect with one click, and let SEO Engine create 301s automatically when slugs change.
@@ -61,14 +64,6 @@ Your content is your SEO foundation. SEO Engine helps you write better, rank hig
 * Automatic language detection for AI suggestions
 * Per-language SEO optimization
 
-**Magic Fix:**
-
-* Generate optimized titles and meta descriptions
-* Fix grammar and typos with HTML-aware context
-* Add internal links with smart suggestions
-* Optimize ALT text for images
-* Improve readability and structure
-
 == 🛠️ Technical SEO ==
 
 All the basics you need, without the bloat. Most SEO plugins bury essential features under endless settings. SEO Engine gets straight to the point—giving you settings only for what actually matters.
@@ -78,6 +73,49 @@ All the basics you need, without the bloat. Most SEO plugins bury essential feat
 * Canonical URLs
 * Meta Tags
 * Structured Data
+
+== 🪄 Magic Fix ==
+
+Most plugins flag SEO issues; very few actually fix them. Magic Fix is SEO Engine's AI-powered fixer — it sits next to each detected issue as a quiet, in-context affordance. Click it, and AI generates a concrete suggestion you can review before anything is written to your post. No bulk "fix everything" button that rewrites your site behind your back; every change is shown to you as a search/replace diff first.
+
+Powered by AI Engine — bring your own provider (OpenAI, Anthropic, Google, etc.). All suggestions are generated in the post's language (Polylang and WPML supported).
+
+**Internal Links — section-aware suggestions:**
+
+* Extracts keywords from the current post, then builds a candidate pool from the same category, same tags, and keyword search
+* AI ranks the most relevant related posts and proposes link placements split by section: Introduction, Body, Conclusion
+* Multiple placement strategies per target — link existing text (preferred), add a short parenthetical, or insert a new sentence
+* You pick which option (or none) to apply per suggested target post
+* Polylang and WPML aware: only candidates in the same language; translations of the current post are excluded
+
+**ALT Text — contextual generation:**
+
+* Scans post content for `<img>` tags missing or with empty `alt` attributes
+* Generates ALT using post title, content excerpt, image filename, and attachment title/caption as context
+* Constrained to short, plain functional descriptions (no "stunning", "tranquil", or "Image of...")
+* Updates the existing `<img>` tag in place — preserves all other attributes
+* Up to 5 images per pass to keep the review surface manageable
+
+**Grammar & Typos — HTML-aware:**
+
+* AI returns precise search/replace pairs with 3-5 words of surrounding context
+* Inline HTML inside the corrected phrase (`<strong>`, `<em>`, links) is preserved exactly
+* Each correction is shown before it's applied; no blind rewrite of your prose
+
+**Title & Excerpt:**
+
+* Rewrite titles to your configured length range (default 30-75 chars) without losing the meaning
+* Generate missing excerpts from content, or rewrite existing ones to a healthy 80-160 chars
+
+**External Links:**
+
+* Suggests authoritative external references (Wikipedia and similar) for relevant in-content terms
+* Wraps existing phrases as links — never invents text
+
+**Featured Image:**
+
+* Generates a featured image with AI when a post is missing one
+* Uploaded to your media library with proper title, description, and ALT text, then set as the post thumbnail
 
 == 🚦 Redirections & 404 ==
 
@@ -217,6 +255,13 @@ SEO Engine works with Polylang, including post filtering and automatic AI langua
 No. The Redirections & 404 module handles URL redirects (301, 302, 307, 308, 410) and tracks 404s in one place. You can convert any 404 into a redirect with one click, and slug changes can be auto-redirected for you. Regex redirects are available in the Pro version.
 
 == Changelog ==
+
+= 0.7.1 (2026/05/16) =
+* Add: Google Search Console integration with OAuth, multi-property support (including Polylang/WPML multi-domain), and a new Search Console dashboard tab showing overview stats, quick wins, top pages, and top queries.
+* Add: Several new MCP tools — `gsc_site_pulse`, `gsc_weekly_digest`, `quick_wins`, `post_pulse`, `status`, `suggest_seo_title`, `suggest_internal_links`, `generate_internal_link_placements`, and `get_orphan_pages`.
+* Update: Reworked the Readability check as "Content Clarity," now scoring how easy a post is to skim and extract by AI bots, with concrete suggestions instead of a Flesch number. The check is off by default; existing internal data keys are preserved for API and MCP consumers.
+* Fix: `og:type` no longer incorrectly emits "article" on the homepage when a static front page is set; it now correctly uses "website."
+* Fix: MCP tools now perform real text search, support site-wide aggregate for `get_issues`, track Googlebot variants, and fall back to CrUX when PageSpeed is unavailable.
 
 = 0.7.0 (2026/05/10) =
 * Add: Redirections + 404 module — manage URL redirects, monitor 404 errors, and convert any 404 into a redirect with one click.

@@ -470,6 +470,61 @@ class Meow_MWSEO_Rest
 
 			#endregion
 
+			#region REST Google Search Console
+
+			register_rest_route( $this->namespace, '/google-search-console/check_auth', array(
+				'methods' => 'GET',
+				'permission_callback' => array( $this->core, 'can_access_settings' ),
+				'callback' => array( $this, 'rest_check_gsc_authenticated' )
+			) );
+			register_rest_route( $this->namespace, '/google-search-console/get_auth', array(
+				'methods' => 'GET',
+				'permission_callback' => array( $this->core, 'can_access_settings' ),
+				'callback' => array( $this, 'rest_get_gsc_auth' )
+			) );
+			register_rest_route( $this->namespace, '/google-search-console/unlink', array(
+				'methods' => 'GET',
+				'permission_callback' => array( $this->core, 'can_access_settings' ),
+				'callback' => array( $this, 'rest_unlink_gsc' )
+			) );
+			register_rest_route( $this->namespace, '/google-search-console/list_properties', array(
+				'methods' => 'GET',
+				'permission_callback' => array( $this->core, 'can_access_settings' ),
+				'callback' => array( $this, 'rest_list_gsc_properties' )
+			) );
+			register_rest_route( $this->namespace, '/google-search-console/set_property', array(
+				'methods' => 'POST',
+				'permission_callback' => array( $this->core, 'can_access_settings' ),
+				'callback' => array( $this, 'rest_set_gsc_property' )
+			) );
+			register_rest_route( $this->namespace, '/google-search-console/toggle_tracked', array(
+				'methods' => 'POST',
+				'permission_callback' => array( $this->core, 'can_access_settings' ),
+				'callback' => array( $this, 'rest_toggle_gsc_tracked' )
+			) );
+			register_rest_route( $this->namespace, '/google-search-console/summary', array(
+				'methods' => 'POST',
+				'permission_callback' => array( $this->core, 'can_access_settings' ),
+				'callback' => array( $this, 'rest_get_gsc_summary' )
+			) );
+			register_rest_route( $this->namespace, '/google-search-console/quick_wins', array(
+				'methods' => 'POST',
+				'permission_callback' => array( $this->core, 'can_access_settings' ),
+				'callback' => array( $this, 'rest_get_gsc_quick_wins' )
+			) );
+			register_rest_route( $this->namespace, '/google-search-console/top_pages', array(
+				'methods' => 'POST',
+				'permission_callback' => array( $this->core, 'can_access_settings' ),
+				'callback' => array( $this, 'rest_get_gsc_top_pages' )
+			) );
+			register_rest_route( $this->namespace, '/google-search-console/top_queries', array(
+				'methods' => 'POST',
+				'permission_callback' => array( $this->core, 'can_access_settings' ),
+				'callback' => array( $this, 'rest_get_gsc_top_queries' )
+			) );
+
+			#endregion
+
 			#region REST Plausible Analytics
 			register_rest_route( $this->namespace, '/plausible-analytics/data', array(
 				'methods' => 'POST',
@@ -2847,6 +2902,143 @@ class Meow_MWSEO_Rest
 				'message' => 'Failed to unlink Google Analytics.'
 			], 500 );
 		}
+	}
+
+	function rest_check_gsc_authenticated() {
+		return new WP_REST_Response( [
+			'success' => true,
+			'is_authenticated' => $this->core->is_gsc_authenticated(),
+			'property' => $this->core->pro && $this->core->pro->search_console
+				? $this->core->pro->search_console->get_property() : '',
+		], 200 );
+	}
+
+	function rest_get_gsc_auth() {
+		$auth_url = $this->core->get_gsc_auth_url();
+		if ( $auth_url ) {
+			return new WP_REST_Response( [
+				'success' => true,
+				'auth_url' => $auth_url
+			], 200 );
+		}
+		return new WP_REST_Response( [
+			'success' => false,
+			'message' => 'Search Console requires Pro and your Google Client ID/Secret in settings.'
+		], 500 );
+	}
+
+	function rest_unlink_gsc() {
+		$res = $this->core->unlink_gsc();
+		if ( $res ) {
+			return new WP_REST_Response( [
+				'success' => true,
+				'message' => 'Google Search Console unlinked successfully.'
+			], 200 );
+		}
+		return new WP_REST_Response( [
+			'success' => false,
+			'message' => 'Failed to unlink Google Search Console.'
+		], 500 );
+	}
+
+	function rest_list_gsc_properties() {
+		$properties = $this->core->list_gsc_properties();
+		$last_error = '';
+		if ( $this->core->pro && $this->core->pro->search_console ) {
+			$last_error = $this->core->pro->search_console->get_last_error() ?: '';
+		}
+		return new WP_REST_Response( [
+			'success' => true,
+			'properties' => $properties,
+			'last_error' => $last_error,
+		], 200 );
+	}
+
+	function rest_set_gsc_property( $request ) {
+		$params = $request->get_json_params();
+		$property = isset( $params['property'] ) ? sanitize_text_field( $params['property'] ) : '';
+		if ( empty( $property ) ) {
+			return new WP_REST_Response( [
+				'success' => false,
+				'message' => 'property is required.'
+			], 400 );
+		}
+		$this->core->set_gsc_property( $property );
+		return new WP_REST_Response( [
+			'success' => true,
+			'property' => $property,
+			'tracked' => $this->core->pro && $this->core->pro->search_console
+				? $this->core->pro->search_console->get_tracked_properties() : [],
+			'message' => 'Active Search Console property updated.'
+		], 200 );
+	}
+
+	function rest_get_gsc_summary( $request ) {
+		$params = $request->get_json_params();
+		$args = [
+			'days' => isset( $params['days'] ) ? (int) $params['days'] : 28,
+			'property' => isset( $params['property'] ) ? sanitize_text_field( $params['property'] ) : null,
+			'fresh' => !empty( $params['fresh'] ),
+		];
+		return new WP_REST_Response( [ 'success' => true, 'data' => $this->core->get_gsc_summary( $args ) ], 200 );
+	}
+
+	function rest_get_gsc_quick_wins( $request ) {
+		$params = $request->get_json_params();
+		$args = [
+			'days' => isset( $params['days'] ) ? (int) $params['days'] : 28,
+			'min_impressions' => isset( $params['min_impressions'] ) ? (int) $params['min_impressions'] : 50,
+			'limit_per_category' => isset( $params['limit_per_category'] ) ? (int) $params['limit_per_category'] : 3,
+			'property' => isset( $params['property'] ) ? sanitize_text_field( $params['property'] ) : null,
+			'fresh' => !empty( $params['fresh'] ),
+		];
+		return new WP_REST_Response( $this->core->get_gsc_quick_wins( $args ), 200 );
+	}
+
+	function rest_get_gsc_top_pages( $request ) {
+		$params = $request->get_json_params();
+		$args = [
+			'days' => isset( $params['days'] ) ? (int) $params['days'] : 28,
+			'limit' => isset( $params['limit'] ) ? (int) $params['limit'] : 10,
+			'property' => isset( $params['property'] ) ? sanitize_text_field( $params['property'] ) : null,
+			'fresh' => !empty( $params['fresh'] ),
+		];
+		return new WP_REST_Response( [ 'success' => true, 'data' => $this->core->get_gsc_top_pages( $args ) ], 200 );
+	}
+
+	function rest_get_gsc_top_queries( $request ) {
+		$params = $request->get_json_params();
+		$args = [
+			'days' => isset( $params['days'] ) ? (int) $params['days'] : 28,
+			'limit' => isset( $params['limit'] ) ? (int) $params['limit'] : 10,
+			'property' => isset( $params['property'] ) ? sanitize_text_field( $params['property'] ) : null,
+			'fresh' => !empty( $params['fresh'] ),
+		];
+		return new WP_REST_Response( [ 'success' => true, 'data' => $this->core->get_gsc_top_queries( $args ) ], 200 );
+	}
+
+	function rest_toggle_gsc_tracked( $request ) {
+		$params = $request->get_json_params();
+		$property = isset( $params['property'] ) ? sanitize_text_field( $params['property'] ) : '';
+		$tracked = isset( $params['tracked'] ) ? (bool) $params['tracked'] : false;
+		if ( empty( $property ) ) {
+			return new WP_REST_Response( [
+				'success' => false,
+				'message' => 'property is required.'
+			], 400 );
+		}
+		$ok = $this->core->toggle_gsc_tracked_property( $property, $tracked );
+		if ( !$ok ) {
+			return new WP_REST_Response( [
+				'success' => false,
+				'message' => 'Could not change tracked state — the active default cannot be untracked.'
+			], 400 );
+		}
+		return new WP_REST_Response( [
+			'success' => true,
+			'tracked' => $this->core->pro && $this->core->pro->search_console
+				? $this->core->pro->search_console->get_tracked_properties() : [],
+		], 200 );
 	}
 
 	// TODO [2025]: Refactor to unified analytics provider interface

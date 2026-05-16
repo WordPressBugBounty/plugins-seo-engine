@@ -1,174 +1,311 @@
 <?php
 
+/**
+ * Content Clarity scorer.
+ *
+ * The class name "Readability" is kept for backward compatibility — externally
+ * this is now "Content Clarity" everywhere user-facing. The score measures
+ * AI-extractability and human-skimmability rather than Flesch Reading Ease
+ * (which Google de-emphasised and AI bots ignore).
+ *
+ * Four signals, 25 points each, rolled up into a single 0-100 score:
+ *   - chunkability: paragraphs sized to be quoted
+ *   - structure:    presence and hierarchy of headings
+ *   - lists:        bullet/numbered lists (AI cites these heavily)
+ *   - clarity:      sentence-level extractability
+ *
+ * Forgiving by design: a normal post with H2s and decent paragraphs scores 75+.
+ * Low scores are reserved for genuinely problematic content.
+ */
 class Meow_MWSEO_Modules_Readability
 {
+	/**
+	 * Detect if text is mostly CJK (Chinese, Japanese, Korean).
+	 * CJK content needs different thresholds — each character carries more meaning
+	 * than a Latin character, so paragraphs and sentences are naturally shorter.
+	 */
+	public function is_mostly_cjk( $text, $threshold = 0.5 ) {
+		if ( empty( $text ) ) return false;
+		$len = mb_strlen( $text, 'UTF-8' );
+		if ( $len === 0 ) return false;
+		preg_match_all( '/[\p{Han}\p{Hiragana}\p{Katakana}\p{Hangul}]/u', $text, $matches );
+		return ( count( $matches[0] ) / $len ) >= $threshold;
+	}
 
 	/**
-	 * Detect if text is mostly CJK (Chinese, Japanese, Korean)
-	 * @param string $text Text to analyze
-	 * @param float $threshold Ratio threshold (default 0.9 = 90%)
-	 * @return bool True if text is ≥90% CJK characters
+	 * Score a post's content for clarity and AI-extractability.
+	 *
+	 * @param string $content_html HTML content (post_content as stored).
+	 * @return array { score, breakdown, suggestions }
+	 *   - score:       int 0-100
+	 *   - breakdown:   per-signal scores 0-25
+	 *   - suggestions: concrete, encouraging strings the agent / Magic Wand can act on
 	 */
-	private function is_mostly_cjk( $text, $threshold = 0.9 ) {
-		if ( empty( $text ) ) {
-			return false;
+	public function calculate_readability( $content_html ) {
+		$content_html = (string) $content_html;
+
+		// Empty content: score 0, one suggestion.
+		if ( trim( strip_tags( $content_html ) ) === '' ) {
+			return [
+				'score' => 0,
+				'breakdown' => [ 'chunkability' => 0, 'structure' => 0, 'lists' => 0, 'clarity' => 0 ],
+				'suggestions' => [ 'This post has no readable content yet.' ],
+			];
 		}
 
-		$text_length = mb_strlen( $text, 'UTF-8' );
-		if ( $text_length === 0 ) {
-			return false;
+		$paragraphs = $this->extract_paragraphs( $content_html );
+		$headings   = $this->extract_headings( $content_html );
+		$has_list   = $this->has_list( $content_html );
+		$plain      = $this->to_plain_text( $content_html );
+		$is_cjk     = $this->is_mostly_cjk( $plain );
+		$word_count = $this->count_words( $plain, $is_cjk );
+
+		$chunk    = $this->score_chunkability( $paragraphs, $is_cjk );
+		$struct   = $this->score_structure( $headings, $word_count );
+		$lists    = $this->score_lists( $has_list, $word_count );
+		$clarity  = $this->score_clarity( $plain, $is_cjk );
+
+		$total = (int) round( $chunk['score'] + $struct['score'] + $lists['score'] + $clarity['score'] );
+		// Clamp defensively.
+		$total = max( 0, min( 100, $total ) );
+
+		$suggestions = array_merge(
+			$chunk['suggestions'], $struct['suggestions'],
+			$lists['suggestions'], $clarity['suggestions']
+		);
+
+		// If the post is in great shape, surface one encouraging line instead of an empty list.
+		if ( empty( $suggestions ) && $total >= 80 ) {
+			$suggestions[] = 'Your content is clean and easy for both humans and AI bots to quote.';
 		}
 
-		// Count CJK characters (Han/Chinese, Hiragana, Katakana, Hangul/Korean)
-		preg_match_all( '/[\p{Han}\p{Hiragana}\p{Katakana}\p{Hangul}]/u', $text, $matches );
-		$cjk_count = count( $matches[0] );
-
-		$ratio = $cjk_count / $text_length;
-		return $ratio >= $threshold;
-	}
-
-	function getVowels( $language ) {
-		$vowels_array = [
-			'english' => [ 'a', 'e', 'i', 'o', 'u', 'y' ],
-			'french' => [ 'a', 'e', 'i', 'o', 'u', 'y', 'â', 'ê', 'î', 'ô', 'û', 'à', 'è', 'ù', 'ë', 'ï', 'ü', 'ÿ', 'æ', 'œ' ],
-			'spanish' => [ 'a', 'e', 'i', 'o', 'u', 'á', 'é', 'í', 'ó', 'ú', 'ü' ],
-			'german' => [ 'a', 'e', 'i', 'o', 'u', 'ä', 'ö', 'ü' ],
-			'italian' => ['a', 'e', 'i', 'o', 'u', 'à', 'è', 'ì', 'ò', 'ù'],
-			'portuguese' => ['a', 'e', 'i', 'o', 'u', 'á', 'é', 'í', 'ó', 'ú'],
-			'turkish' => ['a', 'e', 'ı', 'i', 'o', 'ö', 'u', 'ü'],
-			'swedish' => ['a', 'e', 'i', 'o', 'u', 'å', 'ä', 'ö'],
-
-			'hindi' => ['अ', 'आ', 'इ', 'ई', 'उ', 'ऊ', 'ऋ', 'ए', 'ऐ', 'ओ', 'औ'],
-			'japanese' => ['あ', 'い', 'う', 'え', 'お', 'か', 'き', 'く', 'け', 'こ', 'さ', 'し', 'す', 'せ', 'そ', 'た', 'ち', 'つ', 'て', 'と', 'な', 'に', 'ぬ', 'ね', 'の', 'は', 'ひ', 'ふ', 'へ', 'ほ', 'ま', 'み', 'む', 'め', 'も', 'や', 'ゆ', 'よ', 'ら', 'り', 'る', 'れ', 'ろ', 'わ', 'を', 'ん'],
+		return [
+			'score' => $total,
+			'breakdown' => [
+				'chunkability' => (int) round( $chunk['score'] ),
+				'structure'    => (int) round( $struct['score'] ),
+				'lists'        => (int) round( $lists['score'] ),
+				'clarity'      => (int) round( $clarity['score'] ),
+			],
+			'suggestions' => $suggestions,
 		];
-
-		$vowels = array_key_exists( strtolower( $language ), $vowels_array ) ? $vowels_array[ strtolower( $language ) ] : $vowels_array[ 'english' ];
-	
-		return $vowels;
 	}
 
-	function getWordTailByLanguage( $language ) {
-		$word_tail_array = [
-			'english' => [ 'es', 'ed', 'le' ],
-			'french' => [ 'es', 'é', 'ée', 'ées', 'és', 'è', 'èe', 'èes', 'ès', 'er', 'ers', 'ez', 'ée', 'ées', 'és', 'è', 'èe', 'èes', 'ès', 'er', 'ers', 'ez', 'é', 'ée', 'ées', 'és', 'è', 'èe', 'èes', 'ès', 'er', 'ers', 'ez', 'é', 'ée', 'ées', 'és', 'è', 'èe', 'èes', 'ès', 'er', 'ers', 'ez', 'é', 'ée', 'ées', 'és', 'è', 'èe', 'èes', 'ès', 'er', 'ers', 'ez', 'é', 'ée', 'ées', 'és', 'è', 'èe', 'èes', 'ès', 'er', 'ers', 'ez', 'é', 'ée', 'ées', 'és', 'è', 'èe', 'èes', 'ès', 'er', 'ers', 'ez', 'é', 'ée', 'ées', 'és', 'è', 'èe', 'èes', 'ès', 'er', 'ers', 'ez' ],
-			'spanish' => [ 'ar', 'er', 'ir' ],
-			'german' => [ 'en', 'ung', 'heit', 'keit', 'schaft', 'ung', 'ung', 'lich' ],
-			'italian' => [ 'are', 'ere', 'ire', 'zione', 'zione', 'zione' ],
-			'portuguese' => [ 'ar', 'er', 'ir', 'ção', 'ção', 'ção' ],
-			'turkish' => [ 'mak', 'mek', 'tir', 'tır', 'dir', 'dır', 'ç', 'ce', 'ceğiz', 'ceksiniz' ],
-			'swedish' => [ 'ar', 'er', 'or', 'ning', 'ning', 'het' ],
-			'hindi' => [ 'कर', 'ना', 'करना', 'ले', 'ली', 'ले', 'लो', 'ली', 'ली', 'ले', 'लें', 'लों' ],
-			'japanese' => [ 'する', 'ない', 'ました', 'てる', 'ている', 'できる', 'れる', 'いる', 'いない', 'なさい', 'ます', 'たち', 'てる', 'ている', 'できる', 'れる', 'いる', 'いない', 'なさい', 'ました', 'たち', 'てる', 'ている', 'できる', 'れる', 'いる', 'いない', 'なさい', 'たり', 'った', 'って', 'して', 'ったり', 'てる', 'ている', 'できる', 'れる', 'いる', 'いない', 'なさい', 'ます', 'たり', 'った', 'って', 'して' ],
+	#region Signal scorers
+
+	/**
+	 * Chunkability: are paragraphs sized to be quoted?
+	 * Sweet spot: 50-400 chars (Latin) / 25-200 chars (CJK).
+	 * Mega-paragraphs (>800 / >400) hurt the score hard.
+	 */
+	private function score_chunkability( $paragraphs, $is_cjk ) {
+		if ( empty( $paragraphs ) ) {
+			return [ 'score' => 0, 'suggestions' => [ 'Wrap your content in paragraphs so it can be skimmed and quoted.' ] ];
+		}
+
+		$lo  = $is_cjk ? 25  : 50;
+		$hi  = $is_cjk ? 200 : 400;
+		$mega = $is_cjk ? 400 : 800;
+
+		$good = 0; $mega_count = 0; $mega_sample = null;
+		foreach ( $paragraphs as $p ) {
+			$len = $is_cjk ? mb_strlen( $p, 'UTF-8' ) : strlen( $p );
+			if ( $len >= $lo && $len <= $hi ) {
+				$good++;
+			} else if ( $len > $mega ) {
+				$mega_count++;
+				if ( $mega_sample === null ) {
+					$mega_sample = mb_substr( $p, 0, 60, 'UTF-8' );
+				}
+			}
+		}
+
+		$ratio = $good / count( $paragraphs );
+		// 25 points scaled by good-paragraph ratio, minus mega penalty
+		$score = 25 * $ratio - min( 10, $mega_count * 4 );
+		$score = max( 0, min( 25, $score ) );
+
+		$suggestions = [];
+		if ( $mega_count > 0 ) {
+			$suggestions[] = sprintf(
+				$mega_count === 1
+					? 'One very long paragraph ("%s…"). Splitting where the topic changes makes it 10× more quotable.'
+					: '%d very long paragraphs (the first starts "%s…"). Splitting them at topic changes makes the post 10× more quotable.',
+				$mega_count === 1 ? $mega_sample : $mega_count,
+				$mega_count === 1 ? null : $mega_sample
+			);
+			// Re-format if it was the 2+ case (sprintf above isn't quite right with conditional args)
+			if ( $mega_count > 1 ) {
+				$suggestions[ count($suggestions) - 1 ] = sprintf(
+					'%d very long paragraphs (the first starts "%s…"). Splitting them at topic changes makes the post 10× more quotable.',
+					$mega_count, $mega_sample
+				);
+			}
+		}
+		return [ 'score' => $score, 'suggestions' => $suggestions ];
+	}
+
+	/**
+	 * Structure: does the post have headings, and are they organized?
+	 * - Any H2? base +12.
+	 * - Multiple H2s on posts >600 words? +6.
+	 * - Heading density ~ one per 300 words? +7.
+	 */
+	private function score_structure( $headings, $word_count ) {
+		$h2s = $headings['h2'];
+		$all = $headings['count_all'];
+
+		// Very short posts (< 200 words) don't need headings — give them a free pass.
+		if ( $word_count > 0 && $word_count < 200 ) {
+			return [ 'score' => 25, 'suggestions' => [] ];
+		}
+
+		$score = 0;
+		$suggestions = [];
+
+		if ( $h2s >= 1 ) {
+			$score += 12;
+			if ( $word_count > 600 && $h2s >= 2 ) {
+				$score += 6;
+			} else if ( $word_count > 600 && $h2s === 1 ) {
+				$suggestions[] = 'Your post is long enough to benefit from a second H2 section.';
+			}
+
+			// Density: roughly one heading per 300 words is great.
+			if ( $all > 0 && $word_count > 0 ) {
+				$density = $word_count / $all;
+				if ( $density >= 150 && $density <= 450 ) {
+					$score += 7;
+				} else if ( $density > 450 ) {
+					$suggestions[] = 'Adding one or two more headings would make this easier to skim.';
+				}
+			}
+		} else {
+			$suggestions[] = 'Add at least one H2 section heading. AI bots and readers both rely on them to navigate.';
+		}
+
+		return [ 'score' => min( 25, $score ), 'suggestions' => $suggestions ];
+	}
+
+	/**
+	 * Lists: AI citation rates spike when key facts are in bullet or numbered lists.
+	 * Short posts get a free pass — not everything needs a list.
+	 */
+	private function score_lists( $has_list, $word_count ) {
+		// Posts under 300 words: lists optional.
+		if ( $word_count > 0 && $word_count < 300 ) {
+			return [ 'score' => 25, 'suggestions' => [] ];
+		}
+		if ( $has_list ) {
+			return [ 'score' => 25, 'suggestions' => [] ];
+		}
+		return [
+			'score' => 12,
+			'suggestions' => [ 'A short bulleted summary of your key points would make this post much more citable by AI bots.' ],
 		];
-	
-		$word_tails = array_key_exists( strtolower( $language ), $word_tail_array ) ? $word_tail_array[ strtolower( $language ) ] : $word_tail_array[ 'english' ];
-	
-		return $word_tails;
 	}
 
-    // Mainly for English.
-	//TODO: actually get the language from the settings
-	function count_syllables( $word, $language = 'english' ) {
-		$word = strtolower( trim( $word ) );
-		if ( strlen( $word ) <= 3 ) { return 1; }
-
-
-		$word = preg_replace( '/[^a-z]/is', '', $word );
-		$vowels = $this->getVowels( $language );
-		$syllables = 0;
-		$was_vowel = false;
-
-		for ( $i = 0; $i < strlen( $word ); $i++ ) {
-			$is_vowel = in_array( $word[$i], $vowels );
-			if ( $is_vowel && !$was_vowel ){ $syllables++; }
-			$was_vowel = $is_vowel;
+	/**
+	 * Clarity: sentences extractable / quotable?
+	 * - Latin: avg 14-22 words = ideal; 10-30 = fine.
+	 * - CJK: avg 25-60 chars = ideal.
+	 * - Bonus for share of "short, quotable" sentences (< 28 words).
+	 */
+	private function score_clarity( $plain, $is_cjk ) {
+		$sentences = preg_split( '/(?<=[.!?。！？])\s+/u', $plain, -1, PREG_SPLIT_NO_EMPTY );
+		$sentences = array_filter( array_map( 'trim', $sentences ) );
+		if ( empty( $sentences ) ) {
+			return [ 'score' => 0, 'suggestions' => [] ];
 		}
 
-		$tail = substr( $word, -2 );
+		if ( $is_cjk ) {
+			$lens = array_map( function( $s ) { return mb_strlen( $s, 'UTF-8' ); }, $sentences );
+			$avg = array_sum( $lens ) / count( $lens );
+			if ( $avg >= 25 && $avg <= 60 ) return [ 'score' => 25, 'suggestions' => [] ];
+			if ( $avg > 60 ) {
+				return [ 'score' => 14, 'suggestions' => [ 'Sentences are long. Try shorter, punchier statements where possible.' ] ];
+			}
+			return [ 'score' => 20, 'suggestions' => [] ];
+		}
 
-		//syllables for tail in the language
-		$word_tails = $this->getWordTailByLanguage( $language );
-		if ( in_array( $tail, $word_tails ) ) { $syllables--; }
+		$word_counts = array_map( function( $s ) { return str_word_count( $s ); }, $sentences );
+		$avg = array_sum( $word_counts ) / count( $word_counts );
+		$quotable_ratio = count( array_filter( $word_counts, function( $n ) { return $n > 0 && $n < 28; } ) ) / count( $word_counts );
 
-		if ( $syllables == 0) $syllables = 1;
+		$score = 0;
+		$suggestions = [];
 
-		return $syllables;
+		if ( $avg >= 14 && $avg <= 22 ) {
+			$score = 20;
+		} else if ( $avg >= 10 && $avg <= 28 ) {
+			$score = 16;
+		} else if ( $avg > 28 ) {
+			$score = 8;
+			$suggestions[] = sprintf(
+				'Sentences average %d words. Splitting where you use "and" or commas makes them more quotable.',
+				(int) round( $avg )
+			);
+		} else {
+			$score = 12;
+		}
+
+		// Quotable bonus: up to +5
+		$score += round( $quotable_ratio * 5 );
+
+		return [ 'score' => min( 25, $score ), 'suggestions' => $suggestions ];
 	}
 
-    function calculate_readability( $content ) {
-		$content = wp_kses_post( $content );
+	#endregion
 
-		// Clean up content. Only keep the text.
-		$content = preg_replace( '/<script\b[^>]*>(.*?)<\/script>/is', '', $content );
-		$content = preg_replace( '/<style\b[^>]*>(.*?)<\/style>/is', '', $content );
-		$content = preg_replace( '/<head\b[^>]*>(.*?)<\/head>/is', '', $content );
-		$content = preg_replace( '/<[^>]*>/', '', $content );
+	#region HTML / text helpers
 
-		$content = preg_replace( '/\[.*?\]/', '', $content );
-		$content = preg_replace( '/<.*?>/', '', $content );
-		$content = preg_replace( '/\s+/', ' ', $content );
+	private function extract_paragraphs( $html ) {
+		// Match <p>...</p> blocks.
+		preg_match_all( '/<p\b[^>]*>(.*?)<\/p>/is', $html, $m );
+		$ps = array_map( function( $s ) { return trim( strip_tags( $s ) ); }, $m[1] ?? [] );
+		$ps = array_values( array_filter( $ps, function( $s ) { return $s !== ''; } ) );
 
-		$content = trim( $content );
-
-		$word_count = str_word_count( $content );
-
-		// CJK fallback: If word count is near zero, check if content is mostly CJK
-		if ( $word_count < 10 && $this->is_mostly_cjk( $content ) ) {
-			// Estimate word count: each CJK character ≈ 0.6 words (conservative multiplier)
-			$char_length = mb_strlen( $content, 'UTF-8' );
-			$word_count = max( 1, floor( $char_length * 0.6 ) );
+		// Fallback: if no <p> tags at all (Gutenberg block content may not wrap), split by blank lines.
+		if ( empty( $ps ) ) {
+			$plain = trim( preg_replace( '/\s+/', ' ', strip_tags( $html ) ) );
+			$ps = array_values( array_filter( array_map( 'trim', preg_split( '/\n\s*\n+/', $plain ) ) ) );
 		}
-
-		$readability = [
-			'flesch_kincaid' => 0,
-			'grade' => 'unknown',
-		];
-
-		if ( $word_count == 0 ) {
-			return 0;
-		}
-	
-		$sentences = preg_split( '/(?<=[.?!])\s+/', $content, -1, PREG_SPLIT_NO_EMPTY );
-		$sentence_count = count( $sentences );
-	
-		$syllables = 0;
-		$words = explode( ' ', $content );
-		foreach ( $words as $word ) {
-			$syllables += $this->count_syllables( $word );
-		}
-	
-		$flesch_kincaid = round( 206.835 - ( 1.015 * ( $word_count / $sentence_count ) ) - ( 84.6 * ( $syllables / $word_count ) ), 2 );
-		$flesch_kincaid = min( max( $flesch_kincaid, 0 ), 100 );
-
-		$readability[ 'flesch_kincaid' ] = $flesch_kincaid;
-
-		switch( $readability[ 'flesch_kincaid' ] ){
-			case ( $readability[ 'flesch_kincaid' ] < 10 ):
-				$readability[ 'grade' ] = 'extremely difficult to read best understood by university graduates.';
-				break;
-			case ( $readability[ 'flesch_kincaid' ] < 30 ):
-				$readability['grade'] = 'very difficult to read, best understood by university graduates.';
-				break;
-			case ( $readability[ 'flesch_kincaid' ] < 50 ):
-				$readability['grade'] = 'difficult to read.';
-				break;
-			case ( $readability[ 'flesch_kincaid' ] < 60 ):
-				$readability['grade'] = 'fairly difficult to read.';
-				break;
-			case ( $readability[ 'flesch_kincaid' ] < 70 ):
-				$readability[ 'grade' ] = 'easily understood by 13- to 15-year-old students.';
-				break;
-			case ( $readability['flesch_kincaid'] < 80 ):
-				$readability[ 'grade' ] = 'fairly easy to read.';
-				break;
-			case ( $readability[ 'flesch_kincaid' ] < 90 ):
-				$readability[ 'grade' ] = 'easy to read. Conversational English for consumers.';
-				break;
-			case ( $readability[ 'flesch_kincaid' ] <= 100 ):
-				$readability[ 'grade' ] = 'very easy to read. Easily understood by an average 11-year-old student.';
-				break;
-		}
-
-		return $readability;
+		return $ps;
 	}
+
+	private function extract_headings( $html ) {
+		preg_match_all( '/<(h[1-6])\b[^>]*>(.*?)<\/\1>/is', $html, $m );
+		$h2 = 0; $count_all = 0;
+		foreach ( $m[1] ?? [] as $i => $tag ) {
+			$tag = strtolower( $tag );
+			$text = trim( strip_tags( $m[2][ $i ] ?? '' ) );
+			if ( $text === '' ) continue;
+			$count_all++;
+			if ( $tag === 'h2' ) $h2++;
+		}
+		return [ 'h2' => $h2, 'count_all' => $count_all ];
+	}
+
+	private function has_list( $html ) {
+		return (bool) preg_match( '/<(ul|ol)\b[^>]*>.*?<li\b[^>]*>.+?<\/li>.*?<\/\1>/is', $html );
+	}
+
+	private function to_plain_text( $html ) {
+		$s = preg_replace( '/<script\b[^>]*>.*?<\/script>/is', '', $html );
+		$s = preg_replace( '/<style\b[^>]*>.*?<\/style>/is', '', $s );
+		$s = strip_tags( $s );
+		$s = preg_replace( '/\[.*?\]/', '', $s ); // strip shortcodes
+		$s = preg_replace( '/\s+/u', ' ', $s );
+		return trim( $s );
+	}
+
+	private function count_words( $plain, $is_cjk ) {
+		if ( $is_cjk ) {
+			// Each CJK character ≈ one "word-unit". Generous rounding.
+			return (int) max( 1, floor( mb_strlen( $plain, 'UTF-8' ) * 0.6 ) );
+		}
+		return str_word_count( $plain );
+	}
+
+	#endregion
 }

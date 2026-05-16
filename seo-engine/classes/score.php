@@ -34,7 +34,7 @@ class Meow_MWSEO_Score {
 			// VERY IMPORTANT Checks
 			'alt_coverage' => 15,         // Accessibility & SEO
 			'intent_fit' => 12,           // Content length must fit purpose
-			'readability_score' => 12,    // Flesch Reading Ease for accessibility
+			'readability_score' => 12,    // Content Clarity: chunkability + structure + lists + sentence clarity
 			'excerpt_exists' => 10,       // Meta description needed
 			'featured_image' => 10,       // Visual presence matters
 			'personality_engagement' => 10, // Human voice and personal touch
@@ -685,73 +685,59 @@ class Meow_MWSEO_Score {
 	}
 
 	/**
-	 * Analyze readability using Flesch Reading Ease + AI feedback
-	 * Can be calculated or AI-powered
+	 * Score Content Clarity (AI-extractability + skimmability).
+	 *
+	 * Delegates to Meow_MWSEO_Modules_Readability. The class name there is kept
+	 * for backwards compatibility (it used to be Flesch), but the actual scoring
+	 * is now chunkability + structure + lists + sentence clarity — what AI bots
+	 * and modern readers actually care about. Optional AI feedback appended on
+	 * low scores when AI Engine is available.
 	 */
 	private function analyze_readability( $analysis ) {
-		global $mwai;
+		global $mwseo_readability, $mwai;
 
-		// Calculate Flesch Reading Ease score (0-100)
-		// Higher score = easier to read
 		$content = $analysis['content'];
-
 		if ( empty( $content ) ) {
-			return ['score' => 100, 'feedback' => ''];
+			return [ 'score' => 100, 'feedback' => '' ];
 		}
 
-		// Count sentences (rough approximation)
-		$sentences = preg_split('/[.!?]+/', $content, -1, PREG_SPLIT_NO_EMPTY);
-		$sentence_count = count($sentences);
-
-		if ( $sentence_count === 0 ) return ['score' => 100, 'feedback' => ''];
-
-		// Count words
-		$word_count = $analysis['word_count'];
-		if ( $word_count === 0 ) return ['score' => 100, 'feedback' => ''];
-
-		// Count syllables (approximation: vowel groups)
-		$syllable_count = preg_match_all('/[aeiouy]+/i', $content);
-
-		// Flesch Reading Ease formula
-		// 206.835 - 1.015 * (words/sentences) - 84.6 * (syllables/words)
-		$avg_words_per_sentence = $word_count / $sentence_count;
-		$avg_syllables_per_word = $syllable_count / $word_count;
-
-		$flesch_score = 206.835 - (1.015 * $avg_words_per_sentence) - (84.6 * $avg_syllables_per_word);
-
-		// Normalize to 0-100 (Flesch can go negative or above 100)
-		$flesch_score = max(0, min(100, $flesch_score));
-
-		// Convert Flesch score to our scoring system
-		// 60-100 (easy to read) = 100 score
-		// 30-60 (fairly difficult) = 70 score
-		// 0-30 (very difficult) = 40 score
-		$score = 100;
-		if ( $flesch_score >= 60 ) {
-			$score = 100;
-		} elseif ( $flesch_score >= 30 ) {
-			// Linear interpolation between 70 and 100
-			$score = 70 + (($flesch_score - 30) / 30) * 30;
-		} else {
-			// Linear interpolation between 40 and 70
-			$score = 40 + ($flesch_score / 30) * 30;
+		// Defensive fallback if the global isn't wired (shouldn't happen in practice).
+		if ( !$mwseo_readability ) {
+			require_once dirname( __FILE__ ) . '/modules/readability.php';
+			$mwseo_readability = new Meow_MWSEO_Modules_Readability();
 		}
 
-		// Get AI feedback if score is low and AI is available
+		$result = $mwseo_readability->calculate_readability( $content );
+		$score = (int) ( $result['score'] ?? 0 );
+
+		// Build feedback from the suggestions the module produced.
 		$feedback = '';
-		if ( $score < 70 && $mwai ) {
-			try {
-				$content_sample = substr( $content, 0, 1500 );
-				$prompt = "Readability check. List 2 issues max. Very brief.\n\nText:\n{$content_sample}";
+		if ( !empty( $result['suggestions'] ) ) {
+			$feedback = implode( ' ', array_slice( $result['suggestions'], 0, 2 ) );
+		}
 
+		// Layer AI elaboration on top only when the score is genuinely weak.
+		// The module already explains "what to fix"; AI adds a sentence on "how".
+		if ( $score < 60 && $mwai ) {
+			try {
+				$content_sample = mb_substr( $content, 0, 1500, 'UTF-8' );
+				$baseline = $feedback ? "Specific issues found: {$feedback}" : '';
+				$prompt = "Suggest one concrete way to improve this post's structure or paragraph chunking. One sentence. {$baseline}\n\nText:\n{$content_sample}";
 				$response = $mwai->simpleFastTextQuery( $prompt );
-				$feedback = $this->format_ai_feedback( trim( $response ) );
+				$ai_line = trim( $response );
+				if ( $ai_line !== '' ) {
+					$feedback = $this->format_ai_feedback( trim( ( $feedback ? $feedback . ' ' : '' ) . $ai_line ) );
+				}
 			} catch ( Exception $e ) {
-				$feedback = '';
+				// Fall back to module suggestions; non-fatal.
 			}
 		}
 
-		return ['score' => $score, 'feedback' => $feedback];
+		return [
+			'score' => $score,
+			'feedback' => $feedback,
+			'breakdown' => $result['breakdown'] ?? null,
+		];
 	}
 
 	/**
