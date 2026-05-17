@@ -1851,36 +1851,83 @@ class Meow_MWSEO_Core
 
 	function get_template_llms() {
 
-		$site_url = get_site_url();
-		$site_name = get_bloginfo( 'name' );
+		$site_url   = get_site_url();
+		$site_name  = get_bloginfo( 'name' );
+		$site_desc  = get_bloginfo( 'description' );
 
-		$template = "
-# {SITE_NAME}
+		$summary = !empty( $site_desc )
+			? $site_desc
+			: 'Short summary describing what this site is about.';
 
-> Short summary, e.g. description or key benefits of the site.
+		$lines = [];
+		$lines[] = '# ' . $site_name;
+		$lines[] = '';
+		$lines[] = '> ' . $summary;
+		$lines[] = '';
 
-**Key Features**:
-- **Feature 1**: Brief description of feature 1.
-- **Feature 2**: Brief description of feature 2.
-- **Feature 3**: Brief description of feature 3.
+		// Pages section: front/blog page + top-level pages.
+		$page_entries = [];
+		$front_id = (int) get_option( 'page_on_front' );
+		$blog_id  = (int) get_option( 'page_for_posts' );
+		$seen     = [];
+		$push_page = function( $p ) use ( &$page_entries, &$seen ) {
+			if ( !$p || $p->post_status !== 'publish' ) return;
+			$url = get_permalink( $p );
+			if ( isset( $seen[ $url ] ) ) return;
+			$seen[ $url ] = true;
+			$title = !empty( $p->post_title ) ? $p->post_title : $url;
+			$page_entries[] = '* [' . $title . '](' . $url . '): Add a one-line description for this page.';
+		};
+		if ( $front_id ) $push_page( get_post( $front_id ) );
+		if ( $blog_id && $blog_id !== $front_id ) $push_page( get_post( $blog_id ) );
+		$top_pages = get_posts( [
+			'post_type'      => 'page',
+			'post_status'    => 'publish',
+			'posts_per_page' => 5,
+			'orderby'        => 'menu_order title',
+			'order'          => 'ASC',
+			'post_parent'    => 0,
+		] );
+		foreach ( $top_pages as $p ) $push_page( $p );
 
-## Section Title 1
-* [Page Title 1]({SITE_URL}/url/for/page1): Brief description of the page content.
-* [Page Title 2]({SITE_URL}/url/for/page2): Brief description of the page content.
-* [Page Title 3]({SITE_URL}/url/for/page3): Brief description of the page content.
+		if ( !empty( $page_entries ) ) {
+			$lines[] = '## Pages';
+			foreach ( $page_entries as $e ) $lines[] = $e;
+			$lines[] = '';
+		}
 
-## Section Title 2
-* [Link Description A]({SITE_URL}/url/a): Description of content A.
-* [Link Description B]({SITE_URL}/url/b): Description of content B.
+		// Articles section: most recent published posts.
+		$recent = wp_get_recent_posts( [
+			'numberposts' => 5,
+			'post_status' => 'publish',
+		], OBJECT );
+		if ( !empty( $recent ) ) {
+			$lines[] = '## Articles';
+			foreach ( $recent as $p ) {
+				$url = get_permalink( $p );
+				if ( isset( $seen[ $url ] ) ) continue;
+				$seen[ $url ] = true;
+				$title = !empty( $p->post_title ) ? $p->post_title : $url;
+				$lines[] = '* [' . $title . '](' . $url . '): Add a one-line description for this article.';
+			}
+			$lines[] = '';
+		}
 
-## Optional: Lower-priority Resources
-* [Optional Link]({SITE_URL}/optional/url): This content can be skipped if needed.
-";
+		// Always include an Optional section so users see the spec pattern.
+		if ( empty( $page_entries ) && empty( $recent ) ) {
+			$lines[] = '## Pages';
+			$lines[] = '* [Page Title](' . $site_url . '/page-url/): Add a one-line description for this page.';
+			$lines[] = '';
+			$lines[] = '## Articles';
+			$lines[] = '* [Article Title](' . $site_url . '/post-url/): Add a one-line description for this article.';
+			$lines[] = '';
+		}
 
-		$template = str_replace( '{SITE_URL}', $site_url, $template );
-		$template = str_replace( '{SITE_NAME}', $site_name, $template );
+		$lines[] = '## Optional';
+		$lines[] = '* [Lower-priority resource](' . $site_url . '/optional-url/): Content that can be skipped when context is limited.';
+		$lines[] = '';
 
-		return $template;
+		return implode( "\n", $lines );
 
 	}
 
@@ -1926,6 +1973,29 @@ class Meow_MWSEO_Core
 		}
 
 		return true;
+	}
+
+	function delete_llms_txt() {
+		if ( ! function_exists( 'get_home_path' ) ) {
+			require_once ABSPATH . 'wp-admin/includes/file.php';
+		}
+		$home_path = get_home_path();
+
+		if ( ! is_writable( $home_path ) && ! empty( $_SERVER['DOCUMENT_ROOT'] ) ) {
+			$home_path = $_SERVER['DOCUMENT_ROOT'] . DIRECTORY_SEPARATOR;
+		}
+
+		$llms_path = $home_path . 'llms.txt';
+
+		if ( ! file_exists( $llms_path ) ) {
+			return false;
+		}
+
+		if ( ! is_writable( $llms_path ) ) {
+			return false;
+		}
+
+		return @unlink( $llms_path );
 	}
 
 	#endregion

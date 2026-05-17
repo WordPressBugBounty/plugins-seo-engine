@@ -116,7 +116,12 @@ class Meow_MWSEO_Rest
 				'permission_callback' => array( $this->core, 'can_access_features' ),
 				'callback' => array( $this, 'rest_ai_generate_llms_txt' )
 			) );
-			
+			register_rest_route( $this->namespace, '/delete_llms_txt', array(
+				'methods' => 'POST',
+				'permission_callback' => array( $this->core, 'can_access_features' ),
+				'callback' => array( $this, 'rest_delete_llms_txt' )
+			) );
+
 			#endregion
 
 			#region REST POSTS
@@ -2450,91 +2455,266 @@ class Meow_MWSEO_Rest
 		return new WP_REST_Response( [ 'success' => true ], 200 );
 	}
 
+	function rest_delete_llms_txt( $request ) {
+		$result = $this->core->delete_llms_txt();
+
+		if ( $result === false ) {
+			return new WP_REST_Response( [
+				'success' => false,
+				'message' => 'Could not delete the llms.txt file. It may not exist or the file is not writable.'
+			], 500 );
+		}
+
+		return new WP_REST_Response( [ 'success' => true ], 200 );
+	}
+
 	function rest_ai_generate_llms_txt( $request ) {
 		try {
 			$params  = $request->get_json_params();
-
-			$prompt  = $params['prompt'] ?? '';
-			$content = $params['content'] ?? '';
-
-			if ( empty( $prompt ) ) {
-				return new WP_REST_Response( [ 
-					'success' => false, 
-					'message' => 'Prompt is empty. Please provide a valid prompt.'
-				], 400 );
-			}
+			$notes   = isset( $params['notes'] ) ? trim( (string) $params['notes'] ) : '';
 
 			global $mwai;
 			if ( is_null( $mwai ) || !isset( $mwai ) ) {
-				return new WP_REST_Response( [ 
-					'success' => false, 
+				return new WP_REST_Response( [
+					'success' => false,
 					'message' => 'Missing AI Engine.'
 				], 500 );
 			}
 
-			// Gather the necessary data for the prompt
-			$site_url         = get_site_url();
-			$site_name        = get_bloginfo( 'name' );
-			$site_description = get_bloginfo( 'description' );
-			$site_language    = get_option( 'WPLANG' );
-			$site_post_types  = get_post_types( [ 'public' => true ], 'names' );
-			$site_categories  = get_categories( [ 'hide_empty' => false ] );
-			$site_taxonomies  = get_taxonomies( [ 'public' => true ], 'names' );
+			$payload = $this->collect_llms_content();
 
-			$site_data = [
-				'site_url'         => $site_url,
-				'site_name'        => $site_name,
-				'site_description' => $site_description,
-				'site_language'    => $site_language,
-				'site_post_types'  => implode( ', ', $site_post_types ),
-				'site_categories'  => implode( ', ', wp_list_pluck( $site_categories, 'name' ) ),
-				'site_taxonomies'  => implode( ', ', $site_taxonomies ),
-				'site_sitemap'     => $this->core->get_option( 'sitemap_path' ),
-			];
+			$payload_json = wp_json_encode( $payload, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE );
 
-			$site_data_json = json_encode( $site_data, JSON_PRETTY_PRINT );
+			$instructions  = "You are generating an llms.txt index file for a website, following the llmstxt.org specification.\n\n";
+			$instructions .= "Output ONLY raw markdown (no preamble, no code fences, no commentary). The exact structure MUST be:\n\n";
+			$instructions .= "# {site_name}\n\n";
+			$instructions .= "> One-sentence summary that helps an AI decide whether to fetch more from this site. Factual, concrete, no marketing fluff.\n\n";
+			$instructions .= "## Pages\n";
+			$instructions .= "* [Title](URL): One-line factual description (max ~120 chars).\n";
+			$instructions .= "...\n\n";
+			$instructions .= "## Articles\n";
+			$instructions .= "* [Title](URL): One-line factual description.\n";
+			$instructions .= "...\n\n";
+			$instructions .= "## Optional\n";
+			$instructions .= "* [Title](URL): One-line factual description.\n";
+			$instructions .= "...\n\n";
+			$instructions .= "Rules:\n";
+			$instructions .= "- Use the titles and URLs from the JSON below EXACTLY as provided. Do not invent links. Do not rewrite titles.\n";
+			$instructions .= "- Only the one-line descriptions are yours to write.\n";
+			$instructions .= "- Descriptions must be specific to that page, not generic. Mention the actual topic or purpose.\n";
+			$instructions .= "- Use the page excerpt as a guide for the description, but rewrite it tightly. No jargon. No em-dashes.\n";
+			$instructions .= "- Write in the same language as the site content.\n";
+			$instructions .= "- If a section has no entries in the JSON, omit that section entirely.\n";
+			$instructions .= "- Keep the total file under 8KB.\n";
 
-			$instructions  = "Generate an llms.txt file for a website. The llms.txt file is used to provide information to Large Language Models (LLMs) about your website content, structure, and how they should interact with it.\n\n";
-			$instructions .= "Website Data:\n";
-			$instructions .= $site_data_json . "\n\n";
-			$instructions .= "Here is the prompt from the user:\n";
-			$instructions .= $prompt . "\n\n";
-			$instructions .= "The current content of the llms.txt file is:\n";
-			$instructions .= $content . "\n\n";
-			$instructions .= "Please generate an llms.txt file based on the above information. The llms.txt format typically includes:\n";
-			$instructions .= "- A title line starting with # followed by the site name\n";
-			$instructions .= "- A description block explaining what the site is about\n";
-			$instructions .= "- Sections for different content types or pages\n";
-			$instructions .= "- Links to important pages with descriptions\n";
-			$instructions .= "- Any special instructions for LLMs\n\n";
-			$instructions .= "Don't include any explanations, just provide the raw text of the llms.txt file. No quotes, no code blocks, just the text.\n\n";
+			if ( !empty( $notes ) ) {
+				$instructions .= "\nAdditional tone notes from the site owner (do not let these override the structure rules):\n";
+				$instructions .= $notes . "\n";
+			}
+
+			$instructions .= "\nSite + content JSON:\n";
+			$instructions .= $payload_json . "\n";
 
 			$llms_txt = $mwai->simpleTextQuery( $instructions, [ 'scope' => 'seo' ] );
 			if ( empty( $llms_txt ) || is_null( $llms_txt ) ) {
-				return new WP_REST_Response( [ 
-					'success' => false, 
+				return new WP_REST_Response( [
+					'success' => false,
 					'message' => 'AI suggestion is invalid.'
 				], 400 );
 			}
 
-			// Validate the generated llms.txt content
+			// Strip leading/trailing code fences if the model added them despite instructions.
+			$llms_txt = trim( $llms_txt );
+			$llms_txt = preg_replace( '/^```[a-zA-Z]*\s*\n/', '', $llms_txt );
+			$llms_txt = preg_replace( '/\n```\s*$/', '', $llms_txt );
+
 			if ( strlen( $llms_txt ) > 50000 ) {
-				return new WP_REST_Response( [ 
-					'success' => false, 
+				return new WP_REST_Response( [
+					'success' => false,
 					'message' => 'Generated content is too long. Please limit it to 50000 characters.'
 				], 400 );
 			}
 
-			// Send the generated llms.txt content back to the client
-			return new WP_REST_Response( [ 
-				'success' => true, 
-				'message' => 'OK', 
-				'data'    => $llms_txt 
+			return new WP_REST_Response( [
+				'success' => true,
+				'message' => 'OK',
+				'data'    => $llms_txt
 			], 200 );
-			
+
 		} catch ( Exception $e ) {
 			return new WP_REST_Response( [ 'success' => false, 'message' => $e->getMessage() ], 500 );
 		}
+	}
+
+	/**
+	 * Build the structured content payload the AI uses to write an llms.txt:
+	 * site identity + a deduped list of Pages, Articles, Optional.
+	 *
+	 * Sources blended: front/blog page, main-menu pages, top-level pages by menu_order
+	 * (Pages tier); top SEO-scored posts merged with top GSC pages if available
+	 * (Articles tier); recent posts (Optional tier). All deduped by URL.
+	 */
+	private function collect_llms_content() {
+		$site_url  = get_site_url();
+		$site_name = get_bloginfo( 'name' );
+		$site_desc = get_bloginfo( 'description' );
+
+		$pages     = [];
+		$articles  = [];
+		$optional  = [];
+		$seen      = [];
+
+		$add = function( &$bucket, $url, $title, $excerpt ) use ( &$seen ) {
+			if ( empty( $url ) || empty( $title ) ) return;
+			$url = $this->normalize_url( $url );
+			if ( isset( $seen[ $url ] ) ) return;
+			$seen[ $url ] = true;
+			$bucket[] = [
+				'title'   => $this->shorten( $title, 90 ),
+				'url'     => $url,
+				'excerpt' => $this->shorten( $excerpt, 240 ),
+			];
+		};
+
+		// ---- Pages tier ----------------------------------------------------
+		// Front page (if static), blog page, then main-menu pages, then top-level pages by menu_order.
+		$front_id = (int) get_option( 'page_on_front' );
+		$blog_id  = (int) get_option( 'page_for_posts' );
+		if ( $front_id ) {
+			$p = get_post( $front_id );
+			if ( $p ) $add( $pages, get_permalink( $p ), $this->core->get_seo_title( $p ), $this->core->get_seo_excerpt( $p ) );
+		}
+		if ( $blog_id && $blog_id !== $front_id ) {
+			$p = get_post( $blog_id );
+			if ( $p ) $add( $pages, get_permalink( $p ), $this->core->get_seo_title( $p ), $this->core->get_seo_excerpt( $p ) );
+		}
+
+		$menu_items = $this->fetch_primary_menu_pages();
+		foreach ( $menu_items as $p ) {
+			$add( $pages, get_permalink( $p ), $this->core->get_seo_title( $p ), $this->core->get_seo_excerpt( $p ) );
+		}
+
+		$top_pages = get_posts( [
+			'post_type'      => 'page',
+			'post_status'    => 'publish',
+			'posts_per_page' => 10,
+			'orderby'        => 'menu_order title',
+			'order'          => 'ASC',
+			'post_parent'    => 0,
+		] );
+		foreach ( $top_pages as $p ) {
+			$add( $pages, get_permalink( $p ), $this->core->get_seo_title( $p ), $this->core->get_seo_excerpt( $p ) );
+			if ( count( $pages ) >= 12 ) break;
+		}
+
+		// ---- Articles tier -------------------------------------------------
+		// Top GSC pages first (if available), then top SEO-scored posts.
+		$gsc_pages = [];
+		if ( method_exists( $this->core, 'get_gsc_top_pages' ) ) {
+			$gsc_pages = $this->core->get_gsc_top_pages( [ 'days' => 28, 'limit' => 15 ] );
+			if ( !is_array( $gsc_pages ) ) $gsc_pages = [];
+		}
+		foreach ( $gsc_pages as $row ) {
+			$post_id = isset( $row['post_id'] ) ? (int) $row['post_id'] : 0;
+			$url     = isset( $row['url'] ) ? (string) $row['url'] : '';
+			$title   = isset( $row['post_title'] ) && !empty( $row['post_title'] ) ? $row['post_title'] : '';
+			$excerpt = '';
+			if ( $post_id ) {
+				$p = get_post( $post_id );
+				if ( $p ) {
+					if ( empty( $title ) ) $title = $this->core->get_seo_title( $p );
+					$excerpt = $this->core->get_seo_excerpt( $p );
+				}
+			}
+			$add( $articles, $url, $title, $excerpt );
+			if ( count( $articles ) >= 12 ) break;
+		}
+
+		if ( count( $articles ) < 12 ) {
+			$scored = $this->core->get_all_posts_with_seo_score();
+			if ( is_array( $scored ) ) {
+				usort( $scored, function( $a, $b ) {
+					return (int) ( $b['score'] ?? 0 ) - (int) ( $a['score'] ?? 0 );
+				} );
+				foreach ( $scored as $row ) {
+					if ( (int) ( $row['score'] ?? 0 ) < 60 ) break;
+					$pid = (int) ( $row['id'] ?? 0 );
+					if ( !$pid ) continue;
+					$p = get_post( $pid );
+					if ( !$p || $p->post_status !== 'publish' ) continue;
+					$add( $articles, get_permalink( $p ), $this->core->get_seo_title( $p ), $this->core->get_seo_excerpt( $p ) );
+					if ( count( $articles ) >= 12 ) break;
+				}
+			}
+		}
+
+		// ---- Optional tier -------------------------------------------------
+		$recent = wp_get_recent_posts( [
+			'numberposts' => 15,
+			'post_status' => 'publish',
+		], OBJECT );
+		if ( is_array( $recent ) ) {
+			foreach ( $recent as $p ) {
+				$add( $optional, get_permalink( $p ), $this->core->get_seo_title( $p ), $this->core->get_seo_excerpt( $p ) );
+				if ( count( $optional ) >= 8 ) break;
+			}
+		}
+
+		return [
+			'site_name'        => $site_name,
+			'site_url'         => $site_url,
+			'site_description' => $site_desc,
+			'pages'            => $pages,
+			'articles'         => $articles,
+			'optional'         => $optional,
+		];
+	}
+
+	private function fetch_primary_menu_pages() {
+		$locations = get_nav_menu_locations();
+		$menu = null;
+		foreach ( [ 'primary', 'main', 'top', 'header' ] as $slug ) {
+			if ( !empty( $locations[ $slug ] ) ) {
+				$menu = wp_get_nav_menu_object( $locations[ $slug ] );
+				if ( $menu ) break;
+			}
+		}
+		if ( !$menu && !empty( $locations ) ) {
+			$first = reset( $locations );
+			$menu = wp_get_nav_menu_object( $first );
+		}
+		if ( !$menu ) return [];
+
+		$items = wp_get_nav_menu_items( $menu->term_id );
+		if ( !is_array( $items ) ) return [];
+
+		$posts = [];
+		foreach ( $items as $item ) {
+			if ( $item->object === 'page' || $item->object === 'post' ) {
+				$p = get_post( $item->object_id );
+				if ( $p && $p->post_status === 'publish' ) $posts[] = $p;
+			}
+			if ( count( $posts ) >= 10 ) break;
+		}
+		return $posts;
+	}
+
+	private function normalize_url( $url ) {
+		$url = trim( (string) $url );
+		// Some GSC URLs come with a trailing slash mismatch; keep them as-is but strip fragments.
+		return preg_replace( '/#.*$/', '', $url );
+	}
+
+	private function shorten( $text, $max ) {
+		$text = trim( wp_strip_all_tags( (string) $text ) );
+		if ( $text === '' ) return '';
+		if ( function_exists( 'mb_strlen' ) ? mb_strlen( $text ) <= $max : strlen( $text ) <= $max ) {
+			return $text;
+		}
+		if ( function_exists( 'mb_substr' ) ) {
+			return rtrim( mb_substr( $text, 0, $max ) );
+		}
+		return rtrim( substr( $text, 0, $max ) );
 	}
 
 	#endregion

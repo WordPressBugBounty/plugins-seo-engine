@@ -3,8 +3,8 @@ Contributors: TigrouMeow
 Tags: seo, redirection, sitemap, schema, analytics
 Donate link: https://www.patreon.com/meowapps
 Requires at least: 6.0
-Tested up to: 6.9
-Stable tag: 0.7.1
+Tested up to: 7.0
+Stable tag: 0.7.2
 Requires PHP: 7.4
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
@@ -255,6 +255,10 @@ SEO Engine works with Polylang, including post filtering and automatic AI langua
 No. The Redirections & 404 module handles URL redirects (301, 302, 307, 308, 410) and tracks 404s in one place. You can convert any 404 into a redirect with one click, and slug changes can be auto-redirected for you. Regex redirects are available in the Pro version.
 
 == Changelog ==
+
+= 0.7.2 (2026/05/17) =
+* Update: Redesigned the LLMs tab with live-status indicator, size and links stats, AI-generation and delete actions, and an explanatory notice about llms.txt.
+* Update: The llms.txt template now seeds from real pages and recent posts instead of placeholder text.
 
 = 0.7.1 (2026/05/16) =
 * Add: Google Search Console integration with OAuth, multi-property support (including Polylang/WPML multi-domain), and a new Search Console dashboard tab showing overview stats, quick wins, top pages, and top queries.
