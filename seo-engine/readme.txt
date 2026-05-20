@@ -4,7 +4,7 @@ Tags: seo, redirection, sitemap, schema, analytics
 Donate link: https://www.patreon.com/meowapps
 Requires at least: 6.0
 Tested up to: 7.0
-Stable tag: 0.7.2
+Stable tag: 0.7.3
 Requires PHP: 7.4
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
@@ -246,6 +246,10 @@ Absolutely. Our bulk operations and efficient code make it perfect for sites of 
 
 Yes! SEO Engine can track visits from GPTBot, Claude, Gemini, Perplexity, and many other AI crawlers.
 
+= Do I need to do anything special to rank in AI Overviews or AI Mode? =
+
+No. Google's official AI Optimization Guide (May 2026) confirms that AI Overviews and AI Mode run on the same index and ranking as normal Search — there is no separate AI ranking, no AI-specific markup, and no llms.txt that helps. What works is the same thing that has always worked: original first-hand content with a clear point of view, crawlable pages, no JavaScript-only main content, and writing for humans (not for AI parsers). SEO Engine focuses on exactly those signals, and we surface AI Overview CTR cannibalization in the Search Console tab so you can see when summaries are eating your clicks.
+
 = What about multilingual sites? =
 
 SEO Engine works with Polylang, including post filtering and automatic AI language detection.
@@ -255,6 +259,12 @@ SEO Engine works with Polylang, including post filtering and automatic AI langua
 No. The Redirections & 404 module handles URL redirects (301, 302, 307, 308, 410) and tracks 404s in one place. You can convert any 404 into a redirect with one click, and slug changes can be auto-redirected for you. Regex redirects are available in the Pro version.
 
 == Changelog ==
+
+= 0.7.3 (2026/05/20) =
+* Update: Deprecated the llms.txt editor and removed the chunkability signal, following Google's May 2026 AI Optimization Guide.
+* Add: First-hand originality check has been strengthened.
+* Add: JavaScript-rendered content detector.
+* Add: AI Overview cannibalization view in Search Console.
 
 = 0.7.2 (2026/05/17) =
 * Update: Redesigned the LLMs tab with live-status indicator, size and links stats, AI-generation and delete actions, and an explanatory notice about llms.txt.

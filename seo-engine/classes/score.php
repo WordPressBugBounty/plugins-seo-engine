@@ -33,8 +33,9 @@ class Meow_MWSEO_Score {
 
 			// VERY IMPORTANT Checks
 			'alt_coverage' => 15,         // Accessibility & SEO
+			'js_rendered_content' => 15,  // Main content must be in HTML, not JS-injected
 			'intent_fit' => 12,           // Content length must fit purpose
-			'readability_score' => 12,    // Content Clarity: chunkability + structure + lists + sentence clarity
+			'readability_score' => 12,    // Content Clarity: structure + lists + sentence clarity
 			'excerpt_exists' => 10,       // Meta description needed
 			'featured_image' => 10,       // Visual presence matters
 			'personality_engagement' => 10, // Human voice and personal touch
@@ -541,8 +542,14 @@ class Meow_MWSEO_Score {
 	}
 
 	/**
-	 * Analyze authenticity & originality using AI
-	 * Checks for AI-like patterns, generic phrasing, and originality
+	 * Analyze authenticity & originality using AI.
+	 *
+	 * Google's May 2026 AI Optimization Guide is explicit: "non-commodity"
+	 * content with a "unique point of view that stands out" is what wins.
+	 * The contrast Google gives is "7 Tips for First-Time Homebuyers"
+	 * (commodity, recycled) vs. "Why We Waived the Inspection & Saved Money"
+	 * (first-hand experience). This prompt scores on that exact axis, with
+	 * AI-template phrasing as a secondary penalty.
 	 */
 	private function analyze_authenticity_originality( $analysis ) {
 		global $mwai;
@@ -558,7 +565,13 @@ class Meow_MWSEO_Score {
 				return ['score' => 100, 'feedback' => ''];
 			}
 
-			$prompt = "Originality check. Score 0-100. Only flag obviously templated or AI-generated phrasing (e.g., 'In today\'s fast-paced world', 'It\'s important to note that'). Creative, literary, or poetic writing is NOT generic. Be lenient — most human-written content should score 70+. If < 70, list 2 generic phrases max. Very brief.\n\nText:\n{$content_sample}\n\nJSON: {\"score\": X, \"feedback\": \"...\"}";
+			$prompt = "Score this post 0-100 on the commodity ↔ first-hand axis defined by Google's AI Optimization Guide:\n"
+				. "- 100: unique point of view, first-hand experience, specific details, real anecdotes (e.g. 'Why We Waived the Inspection & Saved Money')\n"
+				. "- 50: solid general advice, but mostly things anyone could write from research (e.g. '7 Tips for First-Time Homebuyers')\n"
+				. "- 0: recycled commodity content, full of AI-template phrases like 'In today's fast-paced world' or 'It's important to note that'\n"
+				. "Creative, literary, or poetic writing counts as first-hand. Be honest, not generous — generic content is the norm and should score in the 40-60 range.\n"
+				. "If < 70, give one sentence of feedback naming the specific weakness (commodity framing, missing personal angle, AI-template phrases, etc).\n\n"
+				. "Text:\n{$content_sample}\n\nJSON: {\"score\": X, \"feedback\": \"...\"}";
 
 			$response = $mwai->simpleFastTextQuery( $prompt );
 			$response = trim( $response );
@@ -685,13 +698,14 @@ class Meow_MWSEO_Score {
 	}
 
 	/**
-	 * Score Content Clarity (AI-extractability + skimmability).
+	 * Score Content Clarity (human skimmability).
 	 *
 	 * Delegates to Meow_MWSEO_Modules_Readability. The class name there is kept
 	 * for backwards compatibility (it used to be Flesch), but the actual scoring
-	 * is now chunkability + structure + lists + sentence clarity — what AI bots
-	 * and modern readers actually care about. Optional AI feedback appended on
-	 * low scores when AI Engine is available.
+	 * is now structure + lists + sentence clarity — written for human readers
+	 * per Google's May 2026 AI guidance (which explicitly says no AI-specific
+	 * chunking is needed). Optional AI feedback appended on low scores when
+	 * AI Engine is available.
 	 */
 	private function analyze_readability( $analysis ) {
 		global $mwseo_readability, $mwai;
@@ -722,7 +736,7 @@ class Meow_MWSEO_Score {
 			try {
 				$content_sample = mb_substr( $content, 0, 1500, 'UTF-8' );
 				$baseline = $feedback ? "Specific issues found: {$feedback}" : '';
-				$prompt = "Suggest one concrete way to improve this post's structure or paragraph chunking. One sentence. {$baseline}\n\nText:\n{$content_sample}";
+				$prompt = "Suggest one concrete way to improve this post's structure or sentence clarity for human readers. One sentence. {$baseline}\n\nText:\n{$content_sample}";
 				$response = $mwai->simpleFastTextQuery( $prompt );
 				$ai_line = trim( $response );
 				if ( $ai_line !== '' ) {
@@ -837,6 +851,7 @@ class Meow_MWSEO_Score {
 		// content_depth already calculated above
 		$tests['structure_quality'] = $this->test_structure_quality( $analysis );
 		$tests['meta_robots_tag'] = $this->test_meta_robots_tag( $post );
+		$tests['js_rendered_content'] = $this->test_js_rendered_content( $post, $analysis );
 
 		// Override ignored tests with perfect scores
 		$ignored_tests = get_post_meta( $post->ID, '_mwseo_ignored_tests', true );
@@ -1357,6 +1372,99 @@ class Meow_MWSEO_Score {
 		}
 
 		return 100; // No penalty
+	}
+
+	/**
+	 * Test whether the post's main content is present in the raw HTML response,
+	 * or whether it only appears after JavaScript runs.
+	 *
+	 * Google's May 2026 AI Optimization Guide is explicit: JavaScript-rendered
+	 * content "isn't blocked from crawlers" is acknowledged as more complex and
+	 * a real risk — content that only renders client-side may not be indexed
+	 * reliably. This check fetches the post's permalink with wp_remote_get and
+	 * verifies that a sample of the post body actually appears in the raw HTML.
+	 *
+	 * Result is cached per-post for 24h via transient to avoid hammering the
+	 * server on bulk scans.
+	 *
+	 * Returns 100 (pass), 0 (fail), or 'NA' (skipped — draft, password-protected,
+	 * empty content, fetch failed, etc).
+	 */
+	private function test_js_rendered_content( $post, $analysis ) {
+		// Only check published posts on a public URL.
+		if ( $post->post_status !== 'publish' ) {
+			return 'NA';
+		}
+		if ( !empty( $post->post_password ) ) {
+			return 'NA';
+		}
+
+		$content = $analysis['content'] ?? '';
+		// Strip shortcodes BEFORE stripping tags — otherwise shortcode tokens
+		// (which expand to different HTML when rendered) would pollute the sample
+		// and cause false positives on shortcode-heavy posts.
+		$plain = trim( preg_replace( '/\s+/u', ' ', wp_strip_all_tags( strip_shortcodes( $content ) ) ) );
+		if ( mb_strlen( $plain, 'UTF-8' ) < 80 ) {
+			// Not enough text to build a reliable signature.
+			return 'NA';
+		}
+
+		$cache_key = 'mwseo_js_render_' . $post->ID . '_' . md5( $post->post_modified . $post->post_content );
+		$cached = get_transient( $cache_key );
+		if ( $cached === 'pass' ) return 100;
+		if ( $cached === 'fail' ) return 0;
+		if ( $cached === 'na' ) return 'NA';
+
+		$permalink = get_permalink( $post );
+		if ( empty( $permalink ) ) {
+			set_transient( $cache_key, 'na', DAY_IN_SECONDS );
+			return 'NA';
+		}
+
+		$response = wp_remote_get( $permalink, [
+			'timeout'   => 8,
+			'sslverify' => false,
+			'headers'   => [ 'User-Agent' => 'Mozilla/5.0 (compatible; SEOEngineBot/1.0; +https://meowapps.com/seo-engine)' ],
+		] );
+
+		if ( is_wp_error( $response ) || wp_remote_retrieve_response_code( $response ) !== 200 ) {
+			set_transient( $cache_key, 'na', HOUR_IN_SECONDS ); // Retry sooner if fetch failed.
+			return 'NA';
+		}
+
+		$html = wp_remote_retrieve_body( $response );
+		if ( empty( $html ) ) {
+			set_transient( $cache_key, 'na', HOUR_IN_SECONDS );
+			return 'NA';
+		}
+
+		// Strip the rendered HTML to plain text so we compare apples to apples
+		// (Gutenberg / shortcodes / theme wrappers all get unwrapped).
+		$rendered_plain = trim( preg_replace( '/\s+/u', ' ', wp_strip_all_tags( $html ) ) );
+
+		// Sample 3 non-overlapping chunks from the post body and check each is present.
+		// A SPA site will have an empty <body> and none of these will appear.
+		$sample_len = 40;
+		$total = mb_strlen( $plain, 'UTF-8' );
+		$samples = [
+			mb_substr( $plain, 0, $sample_len, 'UTF-8' ),
+			mb_substr( $plain, max( 0, intval( $total / 2 ) - intval( $sample_len / 2 ) ), $sample_len, 'UTF-8' ),
+			mb_substr( $plain, max( 0, $total - $sample_len ), $sample_len, 'UTF-8' ),
+		];
+
+		$hits = 0;
+		foreach ( $samples as $sample ) {
+			$sample = trim( $sample );
+			if ( $sample === '' ) continue;
+			if ( mb_stripos( $rendered_plain, $sample, 0, 'UTF-8' ) !== false ) {
+				$hits++;
+			}
+		}
+
+		// Require at least 2 of 3 samples present — handles minor whitespace/HTML differences.
+		$pass = ( $hits >= 2 );
+		set_transient( $cache_key, $pass ? 'pass' : 'fail', DAY_IN_SECONDS );
+		return $pass ? 100 : 0;
 	}
 
 	// ========================================

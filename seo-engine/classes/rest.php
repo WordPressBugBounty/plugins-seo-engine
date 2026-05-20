@@ -3731,7 +3731,7 @@ class Meow_MWSEO_Rest
 			'title_exists', 'title_unique_sitewide', 'title_length', 'slug_structure',
 			'excerpt_exists', 'excerpt_length', 'author_visible', 'content_depth',
 			'not_orphaned', 'internal_links', 'external_link_present', 'alt_coverage',
-			'schema_integrity', 'featured_image', 'meta_robots_tag'
+			'schema_integrity', 'featured_image', 'meta_robots_tag', 'js_rendered_content'
 		];
 
 		foreach ( $technical_tests as $test_name ) {

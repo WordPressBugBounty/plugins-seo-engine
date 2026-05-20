@@ -5,16 +5,17 @@
  *
  * The class name "Readability" is kept for backward compatibility — externally
  * this is now "Content Clarity" everywhere user-facing. The score measures
- * AI-extractability and human-skimmability rather than Flesch Reading Ease
- * (which Google de-emphasised and AI bots ignore).
+ * human-skimmability rather than Flesch Reading Ease (which Google
+ * de-emphasised). Per Google's May 2026 AI optimization guide, there is
+ * explicitly no need to chunk content for AI — so we measure structure for
+ * human readers, not for AI parsers.
  *
- * Four signals, 25 points each, rolled up into a single 0-100 score:
- *   - chunkability: paragraphs sized to be quoted
- *   - structure:    presence and hierarchy of headings
- *   - lists:        bullet/numbered lists (AI cites these heavily)
- *   - clarity:      sentence-level extractability
+ * Three signals rolled up into a single 0-100 score:
+ *   - structure: 33 pts — presence and hierarchy of headings
+ *   - lists:     33 pts — bullet/numbered lists (genuinely help skim-reading)
+ *   - clarity:   34 pts — sentence-level readability
  *
- * Forgiving by design: a normal post with H2s and decent paragraphs scores 75+.
+ * Forgiving by design: a normal post with H2s and decent sentences scores 75+.
  * Low scores are reserved for genuinely problematic content.
  */
 class Meow_MWSEO_Modules_Readability
@@ -33,12 +34,12 @@ class Meow_MWSEO_Modules_Readability
 	}
 
 	/**
-	 * Score a post's content for clarity and AI-extractability.
+	 * Score a post's content for clarity and human-skimmability.
 	 *
 	 * @param string $content_html HTML content (post_content as stored).
 	 * @return array { score, breakdown, suggestions }
 	 *   - score:       int 0-100
-	 *   - breakdown:   per-signal scores 0-25
+	 *   - breakdown:   per-signal scores (structure 0-33, lists 0-33, clarity 0-34)
 	 *   - suggestions: concrete, encouraging strings the agent / Magic Wand can act on
 	 */
 	public function calculate_readability( $content_html ) {
@@ -48,44 +49,40 @@ class Meow_MWSEO_Modules_Readability
 		if ( trim( strip_tags( $content_html ) ) === '' ) {
 			return [
 				'score' => 0,
-				'breakdown' => [ 'chunkability' => 0, 'structure' => 0, 'lists' => 0, 'clarity' => 0 ],
+				'breakdown' => [ 'structure' => 0, 'lists' => 0, 'clarity' => 0 ],
 				'suggestions' => [ 'This post has no readable content yet.' ],
 			];
 		}
 
-		$paragraphs = $this->extract_paragraphs( $content_html );
 		$headings   = $this->extract_headings( $content_html );
 		$has_list   = $this->has_list( $content_html );
 		$plain      = $this->to_plain_text( $content_html );
 		$is_cjk     = $this->is_mostly_cjk( $plain );
 		$word_count = $this->count_words( $plain, $is_cjk );
 
-		$chunk    = $this->score_chunkability( $paragraphs, $is_cjk );
 		$struct   = $this->score_structure( $headings, $word_count );
 		$lists    = $this->score_lists( $has_list, $word_count );
 		$clarity  = $this->score_clarity( $plain, $is_cjk );
 
-		$total = (int) round( $chunk['score'] + $struct['score'] + $lists['score'] + $clarity['score'] );
+		$total = (int) round( $struct['score'] + $lists['score'] + $clarity['score'] );
 		// Clamp defensively.
 		$total = max( 0, min( 100, $total ) );
 
 		$suggestions = array_merge(
-			$chunk['suggestions'], $struct['suggestions'],
-			$lists['suggestions'], $clarity['suggestions']
+			$struct['suggestions'], $lists['suggestions'], $clarity['suggestions']
 		);
 
 		// If the post is in great shape, surface one encouraging line instead of an empty list.
 		if ( empty( $suggestions ) && $total >= 80 ) {
-			$suggestions[] = 'Your content is clean and easy for both humans and AI bots to quote.';
+			$suggestions[] = 'Your content is clear, well-structured, and easy to read.';
 		}
 
 		return [
 			'score' => $total,
 			'breakdown' => [
-				'chunkability' => (int) round( $chunk['score'] ),
-				'structure'    => (int) round( $struct['score'] ),
-				'lists'        => (int) round( $lists['score'] ),
-				'clarity'      => (int) round( $clarity['score'] ),
+				'structure' => (int) round( $struct['score'] ),
+				'lists'     => (int) round( $lists['score'] ),
+				'clarity'   => (int) round( $clarity['score'] ),
 			],
 			'suggestions' => $suggestions,
 		];
@@ -94,62 +91,10 @@ class Meow_MWSEO_Modules_Readability
 	#region Signal scorers
 
 	/**
-	 * Chunkability: are paragraphs sized to be quoted?
-	 * Sweet spot: 50-400 chars (Latin) / 25-200 chars (CJK).
-	 * Mega-paragraphs (>800 / >400) hurt the score hard.
-	 */
-	private function score_chunkability( $paragraphs, $is_cjk ) {
-		if ( empty( $paragraphs ) ) {
-			return [ 'score' => 0, 'suggestions' => [ 'Wrap your content in paragraphs so it can be skimmed and quoted.' ] ];
-		}
-
-		$lo  = $is_cjk ? 25  : 50;
-		$hi  = $is_cjk ? 200 : 400;
-		$mega = $is_cjk ? 400 : 800;
-
-		$good = 0; $mega_count = 0; $mega_sample = null;
-		foreach ( $paragraphs as $p ) {
-			$len = $is_cjk ? mb_strlen( $p, 'UTF-8' ) : strlen( $p );
-			if ( $len >= $lo && $len <= $hi ) {
-				$good++;
-			} else if ( $len > $mega ) {
-				$mega_count++;
-				if ( $mega_sample === null ) {
-					$mega_sample = mb_substr( $p, 0, 60, 'UTF-8' );
-				}
-			}
-		}
-
-		$ratio = $good / count( $paragraphs );
-		// 25 points scaled by good-paragraph ratio, minus mega penalty
-		$score = 25 * $ratio - min( 10, $mega_count * 4 );
-		$score = max( 0, min( 25, $score ) );
-
-		$suggestions = [];
-		if ( $mega_count > 0 ) {
-			$suggestions[] = sprintf(
-				$mega_count === 1
-					? 'One very long paragraph ("%s…"). Splitting where the topic changes makes it 10× more quotable.'
-					: '%d very long paragraphs (the first starts "%s…"). Splitting them at topic changes makes the post 10× more quotable.',
-				$mega_count === 1 ? $mega_sample : $mega_count,
-				$mega_count === 1 ? null : $mega_sample
-			);
-			// Re-format if it was the 2+ case (sprintf above isn't quite right with conditional args)
-			if ( $mega_count > 1 ) {
-				$suggestions[ count($suggestions) - 1 ] = sprintf(
-					'%d very long paragraphs (the first starts "%s…"). Splitting them at topic changes makes the post 10× more quotable.',
-					$mega_count, $mega_sample
-				);
-			}
-		}
-		return [ 'score' => $score, 'suggestions' => $suggestions ];
-	}
-
-	/**
 	 * Structure: does the post have headings, and are they organized?
-	 * - Any H2? base +12.
-	 * - Multiple H2s on posts >600 words? +6.
-	 * - Heading density ~ one per 300 words? +7.
+	 * - Any H2? base +16.
+	 * - Multiple H2s on posts >600 words? +8.
+	 * - Heading density ~ one per 300 words? +9.
 	 */
 	private function score_structure( $headings, $word_count ) {
 		$h2s = $headings['h2'];
@@ -157,16 +102,16 @@ class Meow_MWSEO_Modules_Readability
 
 		// Very short posts (< 200 words) don't need headings — give them a free pass.
 		if ( $word_count > 0 && $word_count < 200 ) {
-			return [ 'score' => 25, 'suggestions' => [] ];
+			return [ 'score' => 33, 'suggestions' => [] ];
 		}
 
 		$score = 0;
 		$suggestions = [];
 
 		if ( $h2s >= 1 ) {
-			$score += 12;
+			$score += 16;
 			if ( $word_count > 600 && $h2s >= 2 ) {
-				$score += 6;
+				$score += 8;
 			} else if ( $word_count > 600 && $h2s === 1 ) {
 				$suggestions[] = 'Your post is long enough to benefit from a second H2 section.';
 			}
@@ -175,41 +120,41 @@ class Meow_MWSEO_Modules_Readability
 			if ( $all > 0 && $word_count > 0 ) {
 				$density = $word_count / $all;
 				if ( $density >= 150 && $density <= 450 ) {
-					$score += 7;
+					$score += 9;
 				} else if ( $density > 450 ) {
 					$suggestions[] = 'Adding one or two more headings would make this easier to skim.';
 				}
 			}
 		} else {
-			$suggestions[] = 'Add at least one H2 section heading. AI bots and readers both rely on them to navigate.';
+			$suggestions[] = 'Add at least one H2 section heading. Readers rely on them to navigate long content.';
 		}
 
-		return [ 'score' => min( 25, $score ), 'suggestions' => $suggestions ];
+		return [ 'score' => min( 33, $score ), 'suggestions' => $suggestions ];
 	}
 
 	/**
-	 * Lists: AI citation rates spike when key facts are in bullet or numbered lists.
+	 * Lists: bullet or numbered lists genuinely help skim-reading.
 	 * Short posts get a free pass — not everything needs a list.
 	 */
 	private function score_lists( $has_list, $word_count ) {
 		// Posts under 300 words: lists optional.
 		if ( $word_count > 0 && $word_count < 300 ) {
-			return [ 'score' => 25, 'suggestions' => [] ];
+			return [ 'score' => 33, 'suggestions' => [] ];
 		}
 		if ( $has_list ) {
-			return [ 'score' => 25, 'suggestions' => [] ];
+			return [ 'score' => 33, 'suggestions' => [] ];
 		}
 		return [
-			'score' => 12,
-			'suggestions' => [ 'A short bulleted summary of your key points would make this post much more citable by AI bots.' ],
+			'score' => 16,
+			'suggestions' => [ 'A short bulleted summary of your key points would make this post much easier to skim.' ],
 		];
 	}
 
 	/**
-	 * Clarity: sentences extractable / quotable?
+	 * Clarity: how readable are the sentences?
 	 * - Latin: avg 14-22 words = ideal; 10-30 = fine.
 	 * - CJK: avg 25-60 chars = ideal.
-	 * - Bonus for share of "short, quotable" sentences (< 28 words).
+	 * - Bonus for share of short, readable sentences (< 28 words).
 	 */
 	private function score_clarity( $plain, $is_cjk ) {
 		$sentences = preg_split( '/(?<=[.!?。！？])\s+/u', $plain, -1, PREG_SPLIT_NO_EMPTY );
@@ -221,57 +166,43 @@ class Meow_MWSEO_Modules_Readability
 		if ( $is_cjk ) {
 			$lens = array_map( function( $s ) { return mb_strlen( $s, 'UTF-8' ); }, $sentences );
 			$avg = array_sum( $lens ) / count( $lens );
-			if ( $avg >= 25 && $avg <= 60 ) return [ 'score' => 25, 'suggestions' => [] ];
+			if ( $avg >= 25 && $avg <= 60 ) return [ 'score' => 34, 'suggestions' => [] ];
 			if ( $avg > 60 ) {
-				return [ 'score' => 14, 'suggestions' => [ 'Sentences are long. Try shorter, punchier statements where possible.' ] ];
+				return [ 'score' => 18, 'suggestions' => [ 'Sentences are long. Try shorter, punchier statements where possible.' ] ];
 			}
-			return [ 'score' => 20, 'suggestions' => [] ];
+			return [ 'score' => 26, 'suggestions' => [] ];
 		}
 
 		$word_counts = array_map( function( $s ) { return str_word_count( $s ); }, $sentences );
 		$avg = array_sum( $word_counts ) / count( $word_counts );
-		$quotable_ratio = count( array_filter( $word_counts, function( $n ) { return $n > 0 && $n < 28; } ) ) / count( $word_counts );
+		$readable_ratio = count( array_filter( $word_counts, function( $n ) { return $n > 0 && $n < 28; } ) ) / count( $word_counts );
 
 		$score = 0;
 		$suggestions = [];
 
 		if ( $avg >= 14 && $avg <= 22 ) {
-			$score = 20;
+			$score = 27;
 		} else if ( $avg >= 10 && $avg <= 28 ) {
-			$score = 16;
+			$score = 22;
 		} else if ( $avg > 28 ) {
-			$score = 8;
+			$score = 11;
 			$suggestions[] = sprintf(
-				'Sentences average %d words. Splitting where you use "and" or commas makes them more quotable.',
+				'Sentences average %d words. Splitting where you use "and" or commas makes them easier to read.',
 				(int) round( $avg )
 			);
 		} else {
-			$score = 12;
+			$score = 16;
 		}
 
-		// Quotable bonus: up to +5
-		$score += round( $quotable_ratio * 5 );
+		// Readability bonus: up to +7
+		$score += round( $readable_ratio * 7 );
 
-		return [ 'score' => min( 25, $score ), 'suggestions' => $suggestions ];
+		return [ 'score' => min( 34, $score ), 'suggestions' => $suggestions ];
 	}
 
 	#endregion
 
 	#region HTML / text helpers
-
-	private function extract_paragraphs( $html ) {
-		// Match <p>...</p> blocks.
-		preg_match_all( '/<p\b[^>]*>(.*?)<\/p>/is', $html, $m );
-		$ps = array_map( function( $s ) { return trim( strip_tags( $s ) ); }, $m[1] ?? [] );
-		$ps = array_values( array_filter( $ps, function( $s ) { return $s !== ''; } ) );
-
-		// Fallback: if no <p> tags at all (Gutenberg block content may not wrap), split by blank lines.
-		if ( empty( $ps ) ) {
-			$plain = trim( preg_replace( '/\s+/', ' ', strip_tags( $html ) ) );
-			$ps = array_values( array_filter( array_map( 'trim', preg_split( '/\n\s*\n+/', $plain ) ) ) );
-		}
-		return $ps;
-	}
 
 	private function extract_headings( $html ) {
 		preg_match_all( '/<(h[1-6])\b[^>]*>(.*?)<\/\1>/is', $html, $m );

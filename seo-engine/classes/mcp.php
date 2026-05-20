@@ -905,7 +905,7 @@ class Meow_MWSEO_MCP {
 
     $tools[] = [
       'name' => 'mwseo_gsc_quick_wins',
-      'description' => 'THE high-leverage SEO tool: returns categorized, actionable opportunities with concrete payoff estimates and one-button-away next steps. Three categories: 🎯 Close to first page (posts ranking #5 to #15 with strong impressions: small lift, big traffic gain), 💡 Title & meta opportunities (high impressions but low CTR: the title or description isn\'t compelling clicks), 💎 Hidden gems (great CTR but few impressions: these posts convert when seen). Each opportunity includes the recommended action, the next MCP tool to run, and an estimated click lift. Requires Pro and a connected GSC property.',
+      'description' => 'THE high-leverage SEO tool: returns categorized, actionable opportunities with concrete payoff estimates and one-button-away next steps. Four categories: 🎯 Close to first page (posts ranking #5 to #15 with strong impressions: small lift, big traffic gain), 💡 Title & meta opportunities (high impressions but low CTR: the title or description isn\'t compelling clicks), 🤖 AI Overview suspects (top-5 queries with severely depressed CTR — likely cannibalized by Google\'s AI Overviews; Ahrefs measures ~60% CTR drop, Pew ~47%), 💎 Hidden gems (great CTR but few impressions: these posts convert when seen). Each opportunity includes the recommended action, the next MCP tool to run, and an estimated click lift. Requires Pro and a connected GSC property.',
       'category' => 'SEO Engine',
       'accessLevel' => 'read',
       'inputSchema' => [
@@ -929,6 +929,37 @@ class Meow_MWSEO_MCP {
           'property' => [
             'type' => 'string',
             'description' => 'Optional. Override the active Search Console property (use the siteUrl from mwseo_gsc_status). Use this for multi-domain Polylang/WPML setups to query a specific language site.'
+          ]
+        ]
+      ]
+    ];
+
+    $tools[] = [
+      'name' => 'mwseo_gsc_ai_overview_suspects',
+      'description' => 'Surfaces queries where this site ranks in the top 5 but clicks-through is severely below the position curve (under 35% of expected) — the signature pattern of Google\'s AI Overview cannibalizing the click. Independent studies measure AI Overviews dropping CTR 47% (Pew) to 60% (Ahrefs) on impacted queries. There is no direct fix that "beats" AI Overviews; the play is to be the source they cite, and to diversify traffic. Requires Pro and a connected GSC property.',
+      'category' => 'SEO Engine',
+      'accessLevel' => 'read',
+      'inputSchema' => [
+        'type' => 'object',
+        'properties' => [
+          'days' => [
+            'type' => 'integer',
+            'description' => 'Lookback window in days. Default 28, max 90.',
+            'default' => 28
+          ],
+          'min_impressions' => [
+            'type' => 'integer',
+            'description' => 'Ignore queries with fewer impressions than this in the period (noise filter). Default 50.',
+            'default' => 50
+          ],
+          'limit_per_category' => [
+            'type' => 'integer',
+            'description' => 'Maximum suspects returned. Default 5, max 50.',
+            'default' => 5
+          ],
+          'property' => [
+            'type' => 'string',
+            'description' => 'Optional. Override the active Search Console property (use the siteUrl from mwseo_gsc_status).'
           ]
         ]
       ]
@@ -2156,6 +2187,17 @@ class Meow_MWSEO_MCP {
             return [ 'success' => false, 'error' => 'Not connected to Google Search Console, or no property set. Run mwseo_gsc_status first, or pass a property argument.' ];
           }
           return $gsc->get_quick_wins( $args );
+        }
+
+        case 'mwseo_gsc_ai_overview_suspects': {
+          if ( !$this->core->pro || !$this->core->pro->search_console ) {
+            return [ 'success' => false, 'error' => 'Search Console module is not available (Pro required).' ];
+          }
+          $gsc = $this->core->pro->search_console;
+          if ( !$gsc->is_authenticated() || ( !$gsc->get_property() && empty( $args['property'] ) ) ) {
+            return [ 'success' => false, 'error' => 'Not connected to Google Search Console, or no property set. Run mwseo_gsc_status first, or pass a property argument.' ];
+          }
+          return $gsc->get_ai_overview_suspects( $args );
         }
 
         case 'mwseo_gsc_site_pulse': {
