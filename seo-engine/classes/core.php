@@ -770,44 +770,85 @@ class Meow_MWSEO_Core
 	}
 
 	function get_live_content( $post, $strip_html = true ) {
+		// Fetch the actual rendered page (handles all page builders)
 		$post_url = get_permalink( $post->ID );
-		if ( ! $post_url ) {
-			$this->log( "⚠️ Could not get permalink for post ID: " . $post->ID );
-			return $post->post_content;
-		}
-		
-		$response = wp_remote_get( $post_url, array(
-			'timeout' => 10,
-			'user-agent' => 'SEO Engine Live Content Checker'
-		) );
-		
-		if ( is_wp_error( $response ) ) {
-			$this->log( "⚠️ Failed to fetch live content for post ID: " . $post->ID . ". Error: " . $response->get_error_message() );
-			return $post->post_content;
-		}
-		
-		if ( wp_remote_retrieve_response_code( $response ) !== 200 ) {
-			$this->log( "⚠️ Failed to fetch live content for post ID: " . $post->ID . ". HTTP Status: " . wp_remote_retrieve_response_code( $response ) );
-			return $post->post_content;
-		}
-		
-		$body = wp_remote_retrieve_body( $response );
-		if ( empty( $body ) ) {
-			$this->log( "⚠️ Empty response body for post ID: " . $post->ID );
-			return $post->post_content;
-		}
-		
-		// Strip HTML tags and get raw text content
-		if ( $strip_html ) {
-			$body = wp_strip_all_tags( $body );
+		if ( !$post_url ) {
+			$this->log( "⚠️ Live Content: Could not find an URL to load for post {$post->ID}" );
+			return $strip_html ? wp_strip_all_tags( $post->post_content ) : $post->post_content;
 		}
 
-		$content = $body;
-		// Clean up extra whitespace
-		$content = preg_replace( '/\s+/', ' ', trim( $content ) );
-		
-		$this->log( "✅ Live content fetched successfully for post ID: " . $post->ID );
-		return $content;
+		$response = wp_remote_get( $post_url, [
+			'timeout' => 15,
+			'user-agent' => 'SEO Engine Content Analyzer'
+		] );
+
+		if ( is_wp_error( $response ) ) {
+			$this->log( "⚠️ Live Content: HTTP request failed for {$post_url}. Error: " . $response->get_error_message() );
+			return $strip_html ? wp_strip_all_tags( $post->post_content ) : $post->post_content;
+		}
+
+		$status_code = wp_remote_retrieve_response_code( $response );
+		if ( $status_code !== 200 ) {
+			$this->log( "⚠️ Live Content: HTTP {$status_code} for {$post_url}" );
+			return $strip_html ? wp_strip_all_tags( $post->post_content ) : $post->post_content;
+		}
+
+		$html = wp_remote_retrieve_body( $response );
+		if ( empty( $html ) ) {
+			$this->log( "⚠️ Live Content: Empty response body for {$post_url}" );
+			return $strip_html ? wp_strip_all_tags( $post->post_content ) : $post->post_content;
+		}
+
+		// Extract main content area
+		$content = $this->extract_main_content( $html );
+		$content_length = strlen( wp_strip_all_tags( $content ) );
+
+		if ( $content_length < 50 ) {
+			$this->log( "⚠️ Live Content: Extracted only {$content_length} chars from {$post_url}" );
+		} else {
+			$this->log( "✅ Live Content: Extracted {$content_length} chars from {$post_url}" );
+		}
+
+		if ( $strip_html ) {
+			$content = wp_strip_all_tags( $content );
+		}
+
+		return preg_replace( '/\s+/', ' ', trim( $content ) );
+	}
+
+	/**
+	 * Extract main content from rendered HTML page
+	 */
+	private function extract_main_content( $html ) {
+		// Remove scripts, styles, comments
+		$html = preg_replace( '/<script\b[^>]*>.*?<\/script>/is', '', $html );
+		$html = preg_replace( '/<style\b[^>]*>.*?<\/style>/is', '', $html );
+		$html = preg_replace( '/<!--.*?-->/s', '', $html );
+
+		// Try common content selectors
+		$selectors = [
+			'/<article[^>]*>(.*?)<\/article>/is',
+			'/<main[^>]*>(.*?)<\/main>/is',
+			'/<div[^>]*class="[^"]*(?:entry-content|post-content|page-content|content-area)[^"]*"[^>]*>(.*?)<\/div>/is',
+		];
+
+		foreach ( $selectors as $pattern ) {
+			if ( preg_match( $pattern, $html, $m ) && strlen( wp_strip_all_tags( $m[1] ) ) > 100 ) {
+				return $m[1];
+			}
+		}
+
+		// Fallback: body minus header/footer/nav
+		if ( preg_match( '/<body[^>]*>(.*?)<\/body>/is', $html, $m ) ) {
+			$body = $m[1];
+			$body = preg_replace( '/<header[^>]*>.*?<\/header>/is', '', $body );
+			$body = preg_replace( '/<footer[^>]*>.*?<\/footer>/is', '', $body );
+			$body = preg_replace( '/<nav[^>]*>.*?<\/nav>/is', '', $body );
+			$body = preg_replace( '/<aside[^>]*>.*?<\/aside>/is', '', $body );
+			return $body;
+		}
+
+		return $html;
 	}
 
 	function check_images_alt_text( $post ) {
@@ -1199,6 +1240,7 @@ class Meow_MWSEO_Core
 			'slug_words_max' => 6,
 			'smart_internal_links' => true,
 			'check_external_links' => false,
+			'check_live_content' => false,
 			'schema_by_post_type' => [
 				'post' => 'Article',
 				'page' => 'WebPage',

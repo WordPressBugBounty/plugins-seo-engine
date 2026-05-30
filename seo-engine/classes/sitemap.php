@@ -208,7 +208,7 @@ class Meow_MWSEO_Sitemap extends WP_Sitemaps_Provider
 
     // Then create sub-sitemap for each post type
     foreach ( $public_post_types as $post_type ) {
-        $sub_sitemap_data = $this->create_sitemap_for_post_type( $post_type, $excluded_posts, $excluded_taxonomies );
+        $sub_sitemap_data = $this->create_sitemap_for_post_type( $post_type, $excluded_posts );
         // If successfully created, add it to index
         if ( $sub_sitemap_data && ! empty( $sub_sitemap_data['filename'] ) ) {
             $sitemaps[] = [
@@ -293,37 +293,14 @@ class Meow_MWSEO_Sitemap extends WP_Sitemaps_Provider
     ];
 }
 
-private function create_sitemap_for_post_type( $post_type, $excluded_posts = [], $excluded_taxonomies = [] ) {
+private function create_sitemap_for_post_type( $post_type, $excluded_posts = [] ) {
 
     $exlcude_posts_provider = $this->core->get_option( 'sitemap_exclude_posts_provider', false );
     if ( $exlcude_posts_provider ) return false;
 
-    $tax_query = [];
-    if ( ! empty( $excluded_taxonomies ) ) {
-        $tax_query['relation'] = 'AND';
-        foreach ( $excluded_taxonomies as $taxonomy ) {
-            if ( taxonomy_exists( $taxonomy ) ) {
-                $all_term_ids = get_terms([
-                    'taxonomy'   => $taxonomy,
-                    'fields'     => 'ids',
-                    'hide_empty' => false,
-                ]);
-                if ( ! empty( $all_term_ids ) && ! is_wp_error( $all_term_ids ) ) {
-                    $tax_query[] = [
-                        'taxonomy' => $taxonomy,
-                        'field'    => 'term_id',
-                        'terms'    => $all_term_ids,
-                        'operator' => 'NOT IN',
-                    ];
-                }
-            }
-        }
-    }
-
     $posts = get_posts([
         'post_type'      => $post_type,
         'post__not_in'   => $excluded_posts,
-        'tax_query'      => $tax_query,
         'orderby'        => 'modified',
         'order'          => 'DESC',
         'posts_per_page' =>  $this->core->get_option( 'sitemap_max_urls', 100 ),
