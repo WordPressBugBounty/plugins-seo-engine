@@ -9,6 +9,9 @@ class Meow_MWSEO_Admin extends MeowKit_MWSEO_Admin {
 		parent::__construct( MWSEO_PREFIX, MWSEO_ENTRY, MWSEO_DOMAIN, class_exists( 'MeowPro_MWSEO_Core' ) );
 		if ( is_admin() ) {
 			add_action( 'admin_menu', array( $this, 'app_menu' ) );
+			// Move "Surgical SEO" to sit right under "All Posts" (the position arg is unreliable
+			// once other plugins add their own items, so we reorder the submenu explicitly).
+			add_action( 'admin_menu', array( $this, 'reorder_surgical_submenu' ), 999 );
 
 			// Load the scripts only if they are needed by the current screen
 			$page = isset( $_GET["page"] ) ? sanitize_text_field( $_GET["page"] ) : null;
@@ -17,13 +20,14 @@ class Meow_MWSEO_Admin extends MeowKit_MWSEO_Admin {
 
 			$is_seo_engine_screen = in_array( $page, [ MWSEO_PREFIX . '_settings', 'seo_engine_dashboard' ] );
 			$is_meowapps_dashboard = $page === 'meowapps-main-menu';
+			$is_surgical_screen = in_array( $page, [ 'mwseo_surgical_post', 'mwseo_surgical_page' ], true );
 
 			$is_wc_product = get_post_type( $post ) === 'product';
 			$is_wc_new_product = $post_type === 'product';
 
 			$is_wc_assistant_enabled = $this->core->get_option( 'woocommerce_assistant', false );
 
-			if ( $is_meowapps_dashboard || $is_seo_engine_screen ) {
+			if ( $is_meowapps_dashboard || $is_seo_engine_screen || $is_surgical_screen ) {
 				add_action( 'admin_enqueue_scripts', array( $this, 'admin_enqueue_scripts' ) );
 			}
 
@@ -178,10 +182,57 @@ class Meow_MWSEO_Admin extends MeowKit_MWSEO_Admin {
 	function app_menu() {
 		add_submenu_page( 'meowapps-main-menu', 'SEO Engine', 'SEO Engine', 'manage_options',
 			MWSEO_PREFIX . '_settings', array( $this, 'admin_settings' ) );
+
+		// Standalone "Surgical SEO" posts manager — shown alongside (never replacing) the
+		// native post lists, only when the Content SEO module is enabled, per enabled post type.
+		if ( $this->core->get_option( 'content_seo', false ) ) {
+			$post_types = (array) $this->core->get_option( 'select_post_types', ['post', 'page'] );
+			$label = __( 'Content SEO', 'seo-engine' );
+
+			if ( in_array( 'post', $post_types, true ) ) {
+				add_submenu_page( 'edit.php', $label, $label, 'manage_options',
+					'mwseo_surgical_post', array( $this, 'render_surgical_posts' ) );
+			}
+			if ( in_array( 'page', $post_types, true ) ) {
+				add_submenu_page( 'edit.php?post_type=page', $label, $label, 'manage_options',
+					'mwseo_surgical_page', array( $this, 'render_surgical_page' ) );
+			}
+		}
+	}
+
+	// Reorders the Posts/Pages submenus so "Surgical SEO" appears right after "All Posts".
+	function reorder_surgical_submenu() {
+		global $submenu;
+		$targets = [
+			'edit.php'               => 'mwseo_surgical_post',
+			'edit.php?post_type=page' => 'mwseo_surgical_page',
+		];
+		foreach ( $targets as $parent => $slug ) {
+			if ( empty( $submenu[ $parent ] ) ) continue;
+			$found = null;
+			foreach ( $submenu[ $parent ] as $i => $item ) {
+				if ( isset( $item[2] ) && $item[2] === $slug ) { $found = $i; break; }
+			}
+			if ( $found === null ) continue;
+			$entry = $submenu[ $parent ][ $found ];
+			unset( $submenu[ $parent ][ $found ] );
+			$items = array_values( $submenu[ $parent ] );
+			// Insert just after the first entry ("All Posts" / "All Pages").
+			array_splice( $items, 1, 0, [ $entry ] );
+			$submenu[ $parent ] = $items;
+		}
 	}
 
 	function admin_settings() {
 		echo '<div id="' . MWSEO_PREFIX . '-admin-settings"></div>';
+	}
+
+	function render_surgical_posts() {
+		echo '<div id="mwseo-surgical-app" data-post-type="post"></div>';
+	}
+
+	function render_surgical_page() {
+		echo '<div id="mwseo-surgical-app" data-post-type="page"></div>';
 	}
 
 	

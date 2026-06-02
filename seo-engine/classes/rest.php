@@ -180,6 +180,26 @@ class Meow_MWSEO_Rest
 				'permission_callback' => array( $this->core, 'can_access_settings' ),
 				'callback' => array( $this, 'rest_update_post' )
 			) );
+			register_rest_route( $this->namespace, '/aggregate_issues', array(
+				'methods' => 'GET',
+				'permission_callback' => array( $this->core, 'can_access_settings' ),
+				'callback' => array( $this, 'rest_aggregate_issues' )
+			) );
+			register_rest_route( $this->namespace, '/issue_posts', array(
+				'methods' => 'GET',
+				'permission_callback' => array( $this->core, 'can_access_settings' ),
+				'callback' => array( $this, 'rest_issue_posts' )
+			) );
+			register_rest_route( $this->namespace, '/bulk_robots', array(
+				'methods' => 'POST',
+				'permission_callback' => array( $this->core, 'can_access_settings' ),
+				'callback' => array( $this, 'rest_bulk_robots' )
+			) );
+			register_rest_route( $this->namespace, '/post_action', array(
+				'methods' => 'POST',
+				'permission_callback' => array( $this->core, 'can_access_settings' ),
+				'callback' => array( $this, 'rest_post_action' )
+			) );
 			register_rest_route( $this->namespace, '/ignore_seo_issue', array(
 				'methods' => 'POST',
 				'permission_callback' => array( $this->core, 'can_access_settings' ),
@@ -865,6 +885,16 @@ class Meow_MWSEO_Rest
 
 		$params = $request->get_json_params();
 
+		// Optional post_type override (used by the standalone Surgical SEO manager so the
+		// Pages page can scope itself without mutating the shared default_post_type option).
+		// Purely additive — the dashboard tab never sends post_type, so it is unaffected.
+		if ( !empty( $params['post_type'] ) ) {
+			$allowed = (array) $this->core->get_option( 'select_post_types', ['post', 'page'] );
+			if ( in_array( $params['post_type'], $allowed, true ) ) {
+				$post_type = $params['post_type'];
+			}
+		}
+
 		$sort = $params['sort'];
 		$page = $params['page'];
 		$limit = $params['limit'];
@@ -883,6 +913,15 @@ class Meow_MWSEO_Rest
 
 		// Get the status filter
 		$status = $this->core->get_option('default_post_status', 'publish');
+
+		// Allow the request to override the saved status (the standalone manager keeps its
+		// status in local state instead of writing the shared option). Enables the Trash view.
+		if ( !empty( $params['post_status'] ) ) {
+			$allowed_status = ['publish', 'future', 'draft', 'pending', 'private', 'trash', 'any'];
+			if ( in_array( $params['post_status'], $allowed_status, true ) ) {
+				$status = $params['post_status'];
+			}
+		}
 
 		$total_counts = [
 			'pending' => 0,
@@ -1007,6 +1046,11 @@ class Meow_MWSEO_Rest
 				'rendered_title' => $this->core->build_title($post),
 				'rendered_excerpt' => $this->core->build_excerpt($post),
 				'post_type' => $post->post_type,
+				'post_status' => $post->post_status,
+				'author_name' => get_the_author_meta('display_name', $post->post_author),
+				'edit_url' => get_edit_post_link($post->ID, 'raw'),
+				'can_edit' => current_user_can('edit_post', $post->ID),
+				'can_delete' => current_user_can('delete_post', $post->ID),
 				'language' => function_exists('pll_get_post_language') ? pll_get_post_language($post->ID, 'slug') : null,
 				'score' => $has_score ? $score_data : null,
 				'ignored_tests' => is_array($ignored_tests) ? $ignored_tests : [],
@@ -1070,7 +1114,7 @@ class Meow_MWSEO_Rest
 		], 200);
 	}
 
-	function rest_get_all_ids() {
+	function rest_get_all_ids( $request = null ) {
 		$post_type = $this->core->get_option( 'default_post_type', 'post' );
 		$language  = $this->core->get_option( 'default_language', 'all' );
 
@@ -1079,12 +1123,27 @@ class Meow_MWSEO_Rest
 			$post_type = $this->core->get_option( 'select_post_types', ['post', 'page'] );
 		}
 
+		// Optional post_type override. 'any' = every enabled type (used by Bulk SEO's analysis,
+		// so it covers pages too); a single valid type is used by the Surgical SEO manager.
+		$req_type = $request ? $request->get_param( 'post_type' ) : null;
+		if ( $req_type === 'any' ) {
+			$post_type = (array) $this->core->get_option( 'select_post_types', ['post', 'page'] );
+		} else if ( !empty( $req_type ) ) {
+			$allowed = (array) $this->core->get_option( 'select_post_types', ['post', 'page'] );
+			if ( in_array( $req_type, $allowed, true ) ) {
+				$post_type = $req_type;
+			}
+		}
+
 		$args = [
 			'post_type' => $post_type,
 			'posts_per_page' => -1, // Get all posts
 			'fields' => 'ids',
+			// Cover the same statuses the analyzer counts (not just published), so a Bulk
+			// Analysis leaves nothing unscanned.
+			'post_status' => ['publish', 'future', 'draft', 'pending', 'private'],
 		];
-		
+
 		// Add language filter if Polylang is active and a specific language is selected
 		if (function_exists('pll_get_post_language') && $language !== 'all') {
 			// Set the language taxonomy query for Polylang
@@ -1295,6 +1354,143 @@ class Meow_MWSEO_Rest
 		return new WP_REST_Response( [
 			'success' => true,
 		], 200 );
+	}
+
+	/**
+	 * Site-wide issue aggregation for the Bulk SEO experience. Delegates to the shared
+	 * Score::aggregate_issues(). Computed fresh each call (a single indexed query, admin-only
+	 * and on-demand) so the view reflects fixes/scans immediately; React Query caches client-side.
+	 */
+	function rest_aggregate_issues( $request ) {
+		global $mwseo_score;
+		if ( !$mwseo_score ) {
+			return $this->error_response( 'Score module not initialized', 'score_module_error', 500 );
+		}
+
+		$args = [];
+		$post_type = $request->get_param( 'post_type' );
+		$status    = $request->get_param( 'status' );
+		$language  = $request->get_param( 'language' );
+		if ( !empty( $post_type ) ) $args['post_type'] = is_array( $post_type ) ? $post_type : explode( ',', $post_type );
+		if ( !empty( $status ) )    $args['status'] = $status;
+		if ( !empty( $language ) )  $args['language'] = $language;
+
+		return $this->success_response( $mwseo_score->aggregate_issues( $args ) );
+	}
+
+	/**
+	 * Returns the analyzed posts failing a specific test (the Bulk SEO work-list).
+	 */
+	function rest_issue_posts( $request ) {
+		global $mwseo_score;
+		if ( !$mwseo_score ) {
+			return $this->error_response( 'Score module not initialized', 'score_module_error', 500 );
+		}
+		$test = $request->get_param( 'test' );
+		if ( empty( $test ) ) {
+			return $this->error_response( 'Missing test parameter', 'no_test' );
+		}
+		$args = [];
+		$post_type = $request->get_param( 'post_type' );
+		$status    = $request->get_param( 'status' );
+		$language  = $request->get_param( 'language' );
+		$limit     = $request->get_param( 'limit' );
+		if ( !empty( $post_type ) ) $args['post_type'] = is_array( $post_type ) ? $post_type : explode( ',', $post_type );
+		if ( !empty( $status ) )    $args['status'] = $status;
+		if ( !empty( $language ) )  $args['language'] = $language;
+		if ( !empty( $limit ) )     $args['limit'] = (int) $limit;
+
+		$data = $mwseo_score->get_posts_failing_test( sanitize_key( $test ), $args );
+		return $this->success_response( $data );
+	}
+
+	/**
+	 * Bulk-set the robots meta on a set of posts (the free, non-AI "hide thin pages from
+	 * search" action). Writes the same _mwseo_robots key the scorer reads.
+	 */
+	function rest_bulk_robots( $request ) {
+		$params   = $request->get_json_params();
+		$post_ids = ( isset( $params['post_ids'] ) && is_array( $params['post_ids'] ) ) ? array_map( 'intval', $params['post_ids'] ) : [];
+		$value    = isset( $params['value'] ) ? (string) $params['value'] : 'noindex,follow';
+
+		if ( empty( $post_ids ) ) {
+			return $this->error_response( 'No posts provided', 'no_posts' );
+		}
+
+		// Whitelist robots directives to avoid storing arbitrary values.
+		$allowed = ['noindex', 'index', 'nofollow', 'follow', 'noarchive', 'nosnippet'];
+		$parts = array_filter( array_map( 'trim', explode( ',', $value ) ) );
+		foreach ( $parts as $p ) {
+			if ( !in_array( $p, $allowed, true ) ) {
+				return $this->error_response( 'Invalid robots value', 'bad_value' );
+			}
+		}
+		$value = implode( ',', $parts );
+
+		$updated = 0;
+		foreach ( $post_ids as $pid ) {
+			if ( !current_user_can( 'edit_post', $pid ) ) continue;
+			update_post_meta( $pid, '_mwseo_robots', $value );
+			$updated++;
+		}
+
+		return $this->success_response( [ 'updated' => $updated ] );
+	}
+
+	/**
+	 * Post management actions for the standalone Surgical SEO manager: trash, restore,
+	 * permanent delete, and quick status change. Per-post capability checks for defense in depth.
+	 */
+	function rest_post_action( $request ) {
+		$params  = $request->get_json_params();
+		$post_id = isset( $params['post_id'] ) ? intval( $params['post_id'] ) : 0;
+		$action  = isset( $params['action'] ) ? sanitize_key( $params['action'] ) : '';
+
+		$post = get_post( $post_id );
+		if ( !$post ) {
+			return $this->error_response( 'Post not found', 'not_found', 404 );
+		}
+
+		$cap_map = [
+			'trash'      => 'delete_post',
+			'restore'    => 'delete_post',
+			'delete'     => 'delete_post',
+			'set_status' => 'edit_post',
+		];
+		if ( !isset( $cap_map[ $action ] ) ) {
+			return $this->error_response( 'Unknown action', 'bad_action' );
+		}
+		if ( !current_user_can( $cap_map[ $action ], $post_id ) ) {
+			return $this->error_response( 'You are not allowed to do this.', 'forbidden', 403 );
+		}
+
+		switch ( $action ) {
+			case 'trash':
+				$ok = (bool) wp_trash_post( $post_id );
+				break;
+			case 'restore':
+				$ok = (bool) wp_untrash_post( $post_id );
+				break;
+			case 'delete':
+				$ok = (bool) wp_delete_post( $post_id, true );
+				break;
+			case 'set_status':
+				$status = ( isset( $params['status'] ) && in_array( $params['status'], ['publish', 'draft', 'pending', 'private'], true ) )
+					? $params['status'] : null;
+				if ( !$status ) {
+					return $this->error_response( 'Invalid status', 'bad_status' );
+				}
+				$res = wp_update_post( [ 'ID' => $post_id, 'post_status' => $status ], true );
+				$ok = !is_wp_error( $res );
+				break;
+			default:
+				$ok = false;
+		}
+
+		if ( !$ok ) {
+			return $this->error_response( 'Action failed', 'action_failed', 500 );
+		}
+		return $this->success_response( [ 'post_id' => $post_id, 'action' => $action ] );
 	}
 
 	function rest_ignore_seo_issue( $request ) {

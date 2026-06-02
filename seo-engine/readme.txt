@@ -4,7 +4,7 @@ Tags: seo, redirection, sitemap, schema, analytics
 Donate link: https://www.patreon.com/meowapps
 Requires at least: 6.0
 Tested up to: 7.0
-Stable tag: 0.7.4
+Stable tag: 0.7.5
 Requires PHP: 7.4
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
@@ -259,6 +259,12 @@ SEO Engine works with Polylang, including post filtering and automatic AI langua
 No. The Redirections & 404 module handles URL redirects (301, 302, 307, 308, 410) and tracks 404s in one place. You can convert any 404 into a redirect with one click, and slug changes can be auto-redirected for you. Regex redirects are available in the Pro version.
 
 == Changelog ==
+
+= 0.7.5 (2026/06/02) =
+* Add: Bulk SEO tab for fixing SEO issues by type across multiple posts at once.
+* Update: Content SEO redesigned as a full posts manager with a shared analysis toolbar.
+* Update: Cleaner card layout in Content SEO.
+* Update: Simpler, insights-first dashboard.
 
 = 0.7.4 (2026/05/30) =
 * Update: Improved logging for live content processing.

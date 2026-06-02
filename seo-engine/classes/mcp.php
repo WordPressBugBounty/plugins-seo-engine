@@ -1806,62 +1806,19 @@ class Meow_MWSEO_MCP {
             ];
           }
 
-          // Site-wide aggregate mode
-          $sample_size = isset( $args['sample_size'] ) ? max( 100, min( 50000, (int) $args['sample_size'] ) ) : 5000;
-
-          global $wpdb;
-          $rows = $wpdb->get_results( $wpdb->prepare(
-            "SELECT post_id, meta_value FROM {$wpdb->postmeta}
-             WHERE meta_key = '_mwseo_analysis' LIMIT %d",
-            $sample_size
-          ) );
-
-          $test_failures = [];
-          $posts_scanned = 0;
-          $posts_with_issues = 0;
-
-          foreach ( $rows as $row ) {
-            $analysis = maybe_unserialize( $row->meta_value );
-            if ( !is_array( $analysis ) || !isset( $analysis['tests'] ) ) continue;
-
-            $posts_scanned++;
-            $had_issue = false;
-
-            foreach ( $analysis['tests'] as $test_name => $score ) {
-              if ( $score === 'NA' || $score >= 70 ) continue;
-              $had_issue = true;
-              $severity = $score < 40 ? 'high' : 'medium';
-
-              if ( !isset( $test_failures[ $test_name ] ) ) {
-                $test_failures[ $test_name ] = [
-                  'test' => $test_name,
-                  'count' => 0,
-                  'high' => 0,
-                  'medium' => 0,
-                  'sample_post_ids' => []
-                ];
-              }
-              $test_failures[ $test_name ]['count']++;
-              $test_failures[ $test_name ][ $severity ]++;
-              if ( count( $test_failures[ $test_name ]['sample_post_ids'] ) < 5 ) {
-                $test_failures[ $test_name ]['sample_post_ids'][] = (int) $row->post_id;
-              }
-            }
-
-            if ( $had_issue ) $posts_with_issues++;
+          // Site-wide aggregate mode — delegate to the shared aggregator so the
+          // MCP tool and the /aggregate_issues REST endpoint never drift apart.
+          global $mwseo_score;
+          if ( !$mwseo_score ) {
+            return [ 'success' => false, 'error' => 'Score module not initialized.' ];
           }
 
-          usort( $test_failures, function( $a, $b ) { return $b['count'] - $a['count']; } );
+          $data = $mwseo_score->aggregate_issues( [
+            'sample_size' => isset( $args['sample_size'] ) ? (int) $args['sample_size'] : 5000,
+            'post_type'   => !empty( $args['post_type'] ) ? (array) $args['post_type'] : null,
+          ] );
 
-          return [
-            'success' => true,
-            'data' => [
-              'posts_scanned' => $posts_scanned,
-              'posts_with_issues' => $posts_with_issues,
-              'sample_size' => $sample_size,
-              'top_failing_tests' => array_values( $test_failures )
-            ]
-          ];
+          return [ 'success' => true, 'data' => $data ];
 
         case 'mwseo_get_orphan_pages':
           $post_type = !empty( $args['post_type'] ) ? (array) $args['post_type'] : [ 'post' ];

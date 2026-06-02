@@ -1531,6 +1531,231 @@ class Meow_MWSEO_Score {
 		return $applied;
 	}
 
+	/**
+	 * Maps each issue type to a fix tier, used by the Bulk SEO experience.
+	 *   ai_tier1 = cheap & safe AI fixes (the v1 bulk set)
+	 *   ai_tier2 = heavier / costlier AI fixes (internal links, image generation)
+	 *   anything not listed = 'manual' (detected, not auto-fixable in bulk yet)
+	 * Keep ai_tier1 + ai_tier2 in sync with the implemented Magic Fix types.
+	 */
+	public function get_fix_tiers() {
+		return [
+			'excerpt_exists'        => 'ai_tier1',
+			'excerpt_length'        => 'ai_tier1',
+			'title_length'          => 'ai_tier1',
+			'grammar_typos'         => 'ai_tier1',
+			'alt_coverage'          => 'ai_tier1',
+			'internal_links'        => 'ai_tier2',
+			'featured_image'        => 'ai_tier2',
+			'external_link_present' => 'ai_tier2',
+		];
+	}
+
+	/**
+	 * Site-wide aggregation of failing tests across already-analyzed posts.
+	 * Shared by the MCP get_issues tool and the /aggregate_issues REST endpoint so
+	 * both stay in sync. Reuses the applied penalties already stored per post
+	 * (_mwseo_analysis['penalties']) so projected score lift needs no recompute.
+	 *
+	 * @param array $args { post_type[], status, language, sample_size }
+	 * @return array { posts_scanned, posts_with_issues, average_score, sample_size, top_failing_tests[] }
+	 */
+	public function aggregate_issues( $args = [] ) {
+		global $wpdb;
+
+		$post_types  = !empty( $args['post_type'] ) ? (array) $args['post_type']
+			: (array) $this->get_option( 'select_post_types', ['post', 'page'] );
+		$status      = !empty( $args['status'] ) ? $args['status'] : 'any';
+		$lang        = isset( $args['language'] ) ? (string) $args['language'] : '';
+		$sample_size = isset( $args['sample_size'] ) ? max( 100, min( 50000, (int) $args['sample_size'] ) ) : 5000;
+
+		$query_args = [
+			'post_type'      => $post_types,
+			'post_status'    => $status === 'any' ? ['publish', 'future', 'draft', 'pending', 'private'] : (array) $status,
+			'posts_per_page' => $sample_size,
+			'fields'         => 'ids',
+			'no_found_rows'  => true,
+			'orderby'        => 'ID',
+			'order'          => 'DESC',
+			// Only posts that have actually been analyzed.
+			'meta_query'     => [ [ 'key' => '_mwseo_analysis', 'compare' => 'EXISTS' ] ],
+		];
+		if ( $lang !== '' && function_exists( 'pll_get_post_language' ) ) {
+			$query_args['lang'] = $lang;
+		}
+
+		$ids = get_posts( $query_args );
+
+		$tiers         = $this->get_fix_tiers();
+		$max_penalties = $this->defaults['penalties'];
+		$test_data     = [];
+		$posts_scanned = 0;
+		$posts_with_issues = 0;
+		$score_sum     = 0;
+		$last_analyzed = 0;
+		$distribution  = [ 'excellent' => 0, 'great' => 0, 'fine' => 0, 'poor' => 0, 'weak' => 0 ];
+
+		if ( !empty( $ids ) ) {
+			$placeholders = implode( ',', array_fill( 0, count( $ids ), '%d' ) );
+			$rows = $wpdb->get_results( $wpdb->prepare(
+				"SELECT post_id, meta_value FROM {$wpdb->postmeta}
+				 WHERE meta_key = '_mwseo_analysis' AND post_id IN ($placeholders)",
+				$ids
+			) );
+
+			foreach ( $rows as $row ) {
+				$analysis = maybe_unserialize( $row->meta_value );
+				if ( !is_array( $analysis ) || !isset( $analysis['tests'] ) ) continue;
+
+				$posts_scanned++;
+				if ( isset( $analysis['timestamp'] ) ) $last_analyzed = max( $last_analyzed, (int) $analysis['timestamp'] );
+				$overall = isset( $analysis['overall'] ) ? (float) $analysis['overall'] : 0;
+				$score_sum += $overall;
+				if ( $overall >= 90 )      $distribution['excellent']++;
+				else if ( $overall >= 75 ) $distribution['great']++;
+				else if ( $overall >= 50 ) $distribution['fine']++;
+				else if ( $overall >= 26 ) $distribution['poor']++;
+				else                       $distribution['weak']++;
+				$applied = ( isset( $analysis['penalties'] ) && is_array( $analysis['penalties'] ) ) ? $analysis['penalties'] : [];
+				$had_issue = false;
+
+				foreach ( $analysis['tests'] as $test_name => $score ) {
+					if ( $score === 'NA' || !is_numeric( $score ) || $score >= 70 ) continue;
+					$had_issue = true;
+					$severity = $score < 40 ? 'high' : 'medium';
+
+					if ( !isset( $test_data[ $test_name ] ) ) {
+						$test_data[ $test_name ] = [
+							'test'                => $test_name,
+							'count'               => 0,
+							'high'                => 0,
+							'medium'              => 0,
+							'sample_post_ids'     => [],
+							'sum_applied_penalty' => 0.0,
+							'tier'                => $tiers[ $test_name ] ?? 'manual',
+						];
+					}
+					$test_data[ $test_name ]['count']++;
+					$test_data[ $test_name ][ $severity ]++;
+					if ( count( $test_data[ $test_name ]['sample_post_ids'] ) < 5 ) {
+						$test_data[ $test_name ]['sample_post_ids'][] = (int) $row->post_id;
+					}
+					// Reuse stored applied penalty; fall back to the formula for older analyses.
+					$pen = isset( $applied[ $test_name ] ) ? (float) $applied[ $test_name ]
+						: ( ( $max_penalties[ $test_name ] ?? 0 ) * ( 100 - $score ) / 100 );
+					$test_data[ $test_name ]['sum_applied_penalty'] += $pen;
+				}
+
+				if ( $had_issue ) $posts_with_issues++;
+			}
+		}
+
+		foreach ( $test_data as &$t ) {
+			$t['sum_applied_penalty'] = round( $t['sum_applied_penalty'], 1 );
+			$t['projected_avg_lift']  = $posts_scanned > 0 ? round( $t['sum_applied_penalty'] / $posts_scanned, 1 ) : 0;
+			$t['fixable']             = in_array( $t['tier'], ['ai_tier1', 'ai_tier2'], true );
+		}
+		unset( $t );
+
+		usort( $test_data, function ( $a, $b ) { return $b['count'] - $a['count']; } );
+
+		$total_issues = 0;
+		foreach ( $test_data as $t ) { $total_issues += $t['count']; }
+
+		// Total posts of these types (any non-trash status), so the UI can show "analyzed X of Y".
+		$posts_total = 0;
+		foreach ( $post_types as $pt ) {
+			$counts = wp_count_posts( $pt );
+			if ( $counts ) {
+				$posts_total += (int) $counts->publish + (int) $counts->future + (int) $counts->draft
+					+ (int) $counts->pending + (int) $counts->private;
+			}
+		}
+
+		return [
+			'posts_scanned'     => $posts_scanned,
+			'posts_total'       => $posts_total,
+			'posts_with_issues' => $posts_with_issues,
+			'total_issues'      => $total_issues,
+			'average_score'     => $posts_scanned > 0 ? round( $score_sum / $posts_scanned, 1 ) : 0,
+			'last_analyzed'     => $last_analyzed ?: null,
+			'distribution'      => $distribution,
+			'sample_size'       => $sample_size,
+			'top_failing_tests' => array_values( $test_data ),
+		];
+	}
+
+	/**
+	 * Returns the analyzed posts that are failing a specific test, with each post's
+	 * applied penalty (= the per-post score it would recover). Used by the Bulk SEO
+	 * "fix this issue everywhere" flow to build its work-list and review deltas.
+	 *
+	 * @param string $test The test/issue key (e.g. excerpt_length)
+	 * @param array  $args { post_type[], status, language, limit }
+	 * @return array { test, total, posts[] }
+	 */
+	public function get_posts_failing_test( $test, $args = [] ) {
+		$post_types = !empty( $args['post_type'] ) ? (array) $args['post_type']
+			: (array) $this->get_option( 'select_post_types', ['post', 'page'] );
+		$status = !empty( $args['status'] ) ? $args['status'] : 'any';
+		$lang   = isset( $args['language'] ) ? (string) $args['language'] : '';
+		$limit  = isset( $args['limit'] ) ? max( 1, min( 2000, (int) $args['limit'] ) ) : 1000;
+
+		$query_args = [
+			'post_type'      => $post_types,
+			'post_status'    => $status === 'any' ? ['publish', 'future', 'draft', 'pending', 'private'] : (array) $status,
+			'posts_per_page' => $limit,
+			'fields'         => 'ids',
+			'no_found_rows'  => true,
+			'orderby'        => 'ID',
+			'order'          => 'DESC',
+			'meta_query'     => [ [ 'key' => '_mwseo_analysis', 'compare' => 'EXISTS' ] ],
+		];
+		if ( $lang !== '' && function_exists( 'pll_get_post_language' ) ) {
+			$query_args['lang'] = $lang;
+		}
+
+		$ids = get_posts( $query_args );
+		$posts = [];
+
+		if ( !empty( $ids ) ) {
+			update_meta_cache( 'post', $ids );
+			foreach ( $ids as $pid ) {
+				$analysis = get_post_meta( $pid, '_mwseo_analysis', true );
+				if ( !is_array( $analysis ) || !isset( $analysis['tests'][ $test ] ) ) continue;
+				$score = $analysis['tests'][ $test ];
+				if ( $score === 'NA' || !is_numeric( $score ) || $score >= 70 ) continue;
+
+				$applied = isset( $analysis['penalties'][ $test ] ) ? (float) $analysis['penalties'][ $test ]
+					: ( ( $this->defaults['penalties'][ $test ] ?? 0 ) * ( 100 - $score ) / 100 );
+				$p = get_post( $pid );
+
+				// Current value for the field this test targets, so the proposals table can
+				// show "before → after" inline (title and meta-description fixes).
+				$current = '';
+				if ( in_array( $test, ['title_length', 'title_exists', 'title_unique_sitewide'], true ) ) {
+					$seo_title = get_post_meta( $pid, '_mwseo_title', true );
+					$current = ( $seo_title !== '' && $seo_title !== false ) ? $seo_title : ( $p ? $p->post_title : '' );
+				} else if ( in_array( $test, ['excerpt_exists', 'excerpt_length'], true ) ) {
+					$seo_ex = get_post_meta( $pid, '_mwseo_excerpt', true );
+					$current = ( $seo_ex !== '' && $seo_ex !== false ) ? $seo_ex : ( $p ? $p->post_excerpt : '' );
+				}
+
+				$posts[] = [
+					'id'         => (int) $pid,
+					'title'      => $p ? $p->post_title : ( '#' . $pid ),
+					'current'    => $current,
+					'score'      => isset( $analysis['overall'] ) ? (int) $analysis['overall'] : null,
+					'test_score' => (int) $score,
+					'penalty'    => round( $applied, 1 ),
+					'edit_url'   => get_edit_post_link( $pid, 'raw' ),
+				];
+			}
+		}
+
+		return [ 'test' => $test, 'total' => count( $posts ), 'posts' => $posts ];
+	}
+
 	// ========================================
 	// HELPER FUNCTIONS
 	// ========================================
