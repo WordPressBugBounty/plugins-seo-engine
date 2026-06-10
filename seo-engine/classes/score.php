@@ -269,6 +269,17 @@ class Meow_MWSEO_Score {
 			return $ai_data;
 		}
 
+		// The AI "Content Intelligence" checks (uniqueness / point-of-view, grammar, etc.) are a
+		// Pro feature. Even when the options are enabled, they only run when the premium add-on is
+		// active. Resolve the effective booleans once and reuse them for the cache key + execution.
+		$is_pro = (bool) $this->core->pro;
+		$check_grammar      = $is_pro && $this->core->get_option( 'check_grammar_typos', false );
+		$check_authenticity = $is_pro && $this->core->get_option( 'check_authenticity_originality', false );
+		$check_personality  = $is_pro && $this->core->get_option( 'check_personality_engagement', false );
+		$check_structure    = $is_pro && $this->core->get_option( 'check_structure_quality', false );
+		$check_readability  = $is_pro && $this->core->get_option( 'check_readability_score', false );
+		$check_topic        = $is_pro && $this->core->get_option( 'check_topic_completeness', false );
+
 		// PERFORMANCE FIX: Cache AI analysis based on content hash
 		// Generate cache key based on full raw content + enabled checks
 		// Using full content ensures any change (even adding a link) invalidates cache
@@ -277,12 +288,12 @@ class Meow_MWSEO_Score {
 			'content' => $analysis['content'], // Full content for accurate change detection
 			'content_html' => $analysis['content_html'], // Include HTML to detect link changes
 			'checks' => [
-				'grammar' => $this->core->get_option( 'check_grammar_typos', false ),
-				'authenticity' => $this->core->get_option( 'check_authenticity_originality', false ),
-				'personality' => $this->core->get_option( 'check_personality_engagement', false ),
-				'structure' => $this->core->get_option( 'check_structure_quality', false ),
-				'readability' => $this->core->get_option( 'check_readability_score', false ),
-				'topic' => $this->core->get_option( 'check_topic_completeness', false ),
+				'grammar' => $check_grammar,
+				'authenticity' => $check_authenticity,
+				'personality' => $check_personality,
+				'structure' => $check_structure,
+				'readability' => $check_readability,
+				'topic' => $check_topic,
 			],
 		];
 		$content_hash = md5( json_encode( $cache_key_data ) );
@@ -322,47 +333,41 @@ class Meow_MWSEO_Score {
 			// Calculate recommended content length based on intent
 			$ai_data['recommended_length'] = $this->calculate_recommended_length( $ai_data['intent'], $analysis['word_count'] );
 
-			// Check grammar and typos if enabled
-			$check_grammar = $this->core->get_option( 'check_grammar_typos', false );
+			// Check grammar and typos if enabled (Pro)
 			if ( $check_grammar ) {
 				$grammar_result = $this->analyze_grammar( $analysis );
 				$ai_data['grammar_score'] = $grammar_result['score'];
 				$ai_data['grammar_feedback'] = $grammar_result['feedback'];
 			}
 
-			// Check authenticity & originality if enabled
-			$check_authenticity = $this->core->get_option( 'check_authenticity_originality', false );
+			// Check authenticity & originality if enabled (Pro)
 			if ( $check_authenticity ) {
 				$authenticity_result = $this->analyze_authenticity_originality( $analysis );
 				$ai_data['authenticity_score'] = $authenticity_result['score'];
 				$ai_data['authenticity_feedback'] = $authenticity_result['feedback'];
 			}
 
-			// Check personality & engagement if enabled
-			$check_personality = $this->core->get_option( 'check_personality_engagement', false );
+			// Check personality & engagement if enabled (Pro)
 			if ( $check_personality ) {
 				$personality_result = $this->analyze_personality_engagement( $analysis );
 				$ai_data['personality_score'] = $personality_result['score'];
 				$ai_data['personality_feedback'] = $personality_result['feedback'];
 			}
 
-			// Check structure quality if enabled
-			$check_structure = $this->core->get_option( 'check_structure_quality', false );
+			// Check structure quality if enabled (Pro)
 			if ( $check_structure ) {
 				$ai_data['structure_score'] = $this->analyze_structure_quality( $analysis );
 			}
 
-			// Check readability score if enabled
-			$check_readability = $this->core->get_option( 'check_readability_score', false );
+			// Check readability score if enabled (Pro)
 			if ( $check_readability ) {
 				$readability_result = $this->analyze_readability( $analysis );
 				$ai_data['readability_score'] = $readability_result['score'];
 				$ai_data['readability_feedback'] = $readability_result['feedback'];
 			}
 
-			// Check topic completeness if enabled
-			$check_topic_completeness = $this->core->get_option( 'check_topic_completeness', false );
-			if ( $check_topic_completeness ) {
+			// Check topic completeness if enabled (Pro)
+			if ( $check_topic ) {
 				$topic_result = $this->analyze_topic_completeness( $analysis );
 				$ai_data['topic_completeness'] = $topic_result['score'];
 				$ai_data['topic_feedback'] = $topic_result['feedback'];

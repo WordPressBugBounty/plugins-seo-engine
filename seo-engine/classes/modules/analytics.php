@@ -587,6 +587,85 @@ class Meow_MWSEO_Modules_Analytics
 		}
 	}
 
+	/**
+	 * Batched per-post daily UNIQUE-visitor series for the last $days, for the Content SEO sparklines.
+	 * Uses whatever the user picked as Display Source (analytics_method). One batched call/query for
+	 * the whole list (never one per post). Returns: [ post_id => [ ['date'=>Y-m-d,'visitors'=>int], ... ] ]
+	 * with a zero-filled date axis so every sparkline has the same length.
+	 */
+	public function get_posts_visitor_series( $post_ids, $days = 30 )
+	{
+		$post_ids = array_values( array_unique( array_filter( array_map( 'intval', (array) $post_ids ) ) ) );
+		if ( empty( $post_ids ) ) return array();
+		$days  = max( 7, min( 90, (int) $days ) );
+		$end   = date( 'Y-m-d' );
+		$start = date( 'Y-m-d', strtotime( '-' . ( $days - 1 ) . ' days' ) );
+
+		// Zero-filled axis so the chart always renders $days points, even with no traffic.
+		$axis = array();
+		for ( $i = 0; $i < $days; $i++ ) { $axis[ date( 'Y-m-d', strtotime( "$start +$i days" ) ) ] = 0; }
+		$series = array();
+		foreach ( $post_ids as $pid ) { $series[ $pid ] = $axis; }
+
+		$method = $this->core->get_option( 'analytics_method', 'private' );
+
+		if ( $method === 'google' ) {
+			$rows = $this->core->get_google_analytics_pages_daily( $start, $end );
+			if ( !empty( $rows ) ) {
+				// Map each requested post's permalink (host + normalized path) to its id; the GA4 rows
+				// carry hostName + pagePath, so multi-domain (Polylang) posts resolve correctly.
+				$map = array();
+				foreach ( $post_ids as $pid ) {
+					$pl   = get_permalink( $pid );
+					$host = parse_url( $pl, PHP_URL_HOST );
+					$path = $this->normalize_visitor_path( parse_url( $pl, PHP_URL_PATH ) );
+					$map[ $host . '|' . $path ] = $pid;
+					if ( !isset( $map[ '*|' . $path ] ) ) $map[ '*|' . $path ] = $pid; // host-agnostic fallback
+				}
+				foreach ( $rows as $r ) {
+					$path = $this->normalize_visitor_path( $r['path'] );
+					$pid  = isset( $map[ $r['host'] . '|' . $path ] ) ? $map[ $r['host'] . '|' . $path ]
+						  : ( isset( $map[ '*|' . $path ] ) ? $map[ '*|' . $path ] : 0 );
+					if ( $pid && isset( $series[ $pid ][ $r['date'] ] ) ) {
+						$series[ $pid ][ $r['date'] ] += (int) $r['visitors'];
+					}
+				}
+			}
+		}
+		else if ( $method === 'private' ) {
+			global $wpdb;
+			$placeholders = implode( ',', array_fill( 0, count( $post_ids ), '%d' ) );
+			$sql = "SELECT post_id, DATE(visit_date) AS d, COUNT(DISTINCT user_ip) AS visitors
+				FROM {$this->table_name}
+				WHERE post_id IN ($placeholders) AND visit_date >= %s AND visit_date <= %s
+				GROUP BY post_id, DATE(visit_date)";
+			$params = array_merge( $post_ids, array( $start . ' 00:00:00', $end . ' 23:59:59' ) );
+			$db_rows = $wpdb->get_results( $wpdb->prepare( $sql, $params ), ARRAY_A );
+			foreach ( (array) $db_rows as $r ) {
+				$pid = (int) $r['post_id'];
+				if ( isset( $series[ $pid ][ $r['d'] ] ) ) $series[ $pid ][ $r['d'] ] = (int) $r['visitors'];
+			}
+		}
+		// plausible / none: no batched daily series available -> zero-filled (chart degrades to flat).
+
+		$out = array();
+		foreach ( $series as $pid => $by_date ) {
+			ksort( $by_date );
+			$points = array();
+			foreach ( $by_date as $date => $v ) { $points[] = array( 'date' => $date, 'visitors' => (int) $v ); }
+			$out[ $pid ] = $points;
+		}
+		return $out;
+	}
+
+	private function normalize_visitor_path( $path )
+	{
+		$path = (string) $path;
+		$q = strpos( $path, '?' );
+		if ( $q !== false ) $path = substr( $path, 0, $q );
+		return strtolower( '/' . trim( $path, '/' ) );
+	}
+
 	public function get_top_posts( $args = array() )
 	{
 		// Check Display Source setting and route to appropriate provider

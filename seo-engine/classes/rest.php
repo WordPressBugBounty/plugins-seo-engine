@@ -425,6 +425,11 @@ class Meow_MWSEO_Rest
 				'permission_callback' => array( $this->core, 'can_access_settings' ),
 				'callback' => array( $this, 'rest_get_analytics_data' )
 			) );
+			register_rest_route( $this->namespace, '/analytics/posts_visitor_series', array(
+				'methods' => 'POST',
+				'permission_callback' => array( $this->core, 'can_access_settings' ),
+				'callback' => array( $this, 'rest_get_posts_visitor_series' )
+			) );
 			register_rest_route( $this->namespace, '/analytics/summary', array(
 				'methods' => 'POST',
 				'permission_callback' => array( $this->core, 'can_access_settings' ),
@@ -546,6 +551,26 @@ class Meow_MWSEO_Rest
 				'methods' => 'POST',
 				'permission_callback' => array( $this->core, 'can_access_settings' ),
 				'callback' => array( $this, 'rest_get_gsc_top_queries' )
+			) );
+			register_rest_route( $this->namespace, '/google-search-console/post_metrics_map', array(
+				'methods' => 'GET',
+				'permission_callback' => array( $this->core, 'can_access_settings' ),
+				'callback' => array( $this, 'rest_get_gsc_post_metrics_map' )
+			) );
+			register_rest_route( $this->namespace, '/google-search-console/post_pulse', array(
+				'methods' => 'GET',
+				'permission_callback' => array( $this->core, 'can_access_settings' ),
+				'callback' => array( $this, 'rest_get_gsc_post_pulse' )
+			) );
+			register_rest_route( $this->namespace, '/google-search-console/breakdown', array(
+				'methods' => 'POST',
+				'permission_callback' => array( $this->core, 'can_access_settings' ),
+				'callback' => array( $this, 'rest_get_gsc_breakdown' )
+			) );
+			register_rest_route( $this->namespace, '/google-search-console/pages_with_issues', array(
+				'methods' => 'POST',
+				'permission_callback' => array( $this->core, 'can_access_settings' ),
+				'callback' => array( $this, 'rest_get_gsc_pages_with_issues' )
 			) );
 
 			#endregion
@@ -1133,6 +1158,13 @@ class Meow_MWSEO_Rest
 			if ( in_array( $req_type, $allowed, true ) ) {
 				$post_type = $req_type;
 			}
+		}
+
+		// Optional language override, used by Bulk SEO so its scan can be scoped without
+		// touching the saved default_language option.
+		$req_lang = $request ? $request->get_param( 'language' ) : null;
+		if ( !empty( $req_lang ) ) {
+			$language = $req_lang;
 		}
 
 		$args = [
@@ -2184,12 +2216,14 @@ class Meow_MWSEO_Rest
 			$insight_text = $mwai->simpleTextQuery( $prompt, [ 'scope' => 'seo' ] );
 
 			// Store insight with timestamp
+			$now = current_time( 'mysql' );
 			$this->core->update_option( 'daily_insight_text', $insight_text );
-			$this->core->update_option( 'daily_insight_generated_at', current_time( 'mysql' ) );
+			$this->core->update_option( 'daily_insight_generated_at', $now );
 
 			return $this->success_response( [
 				'text' => $insight_text,
-				'generated_at' => current_time( 'mysql' )
+				'generated_at' => $now,
+				'generated_at_ts' => strtotime( get_gmt_from_date( $now ) . ' UTC' )
 			] );
 
 		} catch ( Exception $e ) {
@@ -2205,13 +2239,19 @@ class Meow_MWSEO_Rest
 		if ( !$text ) {
 			return $this->success_response( [
 				'text' => null,
-				'generated_at' => null
+				'generated_at' => null,
+				'generated_at_ts' => null
 			] );
 		}
 
+		// generated_at is a local "mysql" datetime; convert it to a real UTC timestamp so the
+		// frontend's ago() helper (which compares against Date.now()) is timezone-correct.
+		$ts = $generated_at ? strtotime( get_gmt_from_date( $generated_at ) . ' UTC' ) : null;
+
 		return $this->success_response( [
 			'text' => $text,
-			'generated_at' => $generated_at
+			'generated_at' => $generated_at,
+			'generated_at_ts' => $ts
 		] );
 	}
 
@@ -3087,6 +3127,16 @@ class Meow_MWSEO_Rest
 	#region Analytics
 
 	// TODO [2025]: Refactor to unified analytics provider interface
+	function rest_get_posts_visitor_series( $request ) {
+		$params = $request->get_json_params();
+		$post_ids = isset( $params['post_ids'] ) && is_array( $params['post_ids'] ) ? $params['post_ids'] : array();
+		$days = isset( $params['days'] ) ? (int) $params['days'] : 30;
+		return new WP_REST_Response( [
+			'success' => true,
+			'data' => $this->core->get_posts_visitor_series( $post_ids, $days )
+		], 200 );
+	}
+
 	function rest_get_analytics_data( $request ) {
 		try {
 			$params = $request->get_json_params();
@@ -3391,6 +3441,43 @@ class Meow_MWSEO_Rest
 			'fresh' => !empty( $params['fresh'] ),
 		];
 		return new WP_REST_Response( [ 'success' => true, 'data' => $this->core->get_gsc_top_queries( $args ) ], 200 );
+	}
+
+	function rest_get_gsc_post_metrics_map( $request ) {
+		$days = $request->get_param( 'days' ) ? (int) $request->get_param( 'days' ) : 28;
+		$args = [ 'days' => $days, 'fresh' => !empty( $request->get_param( 'fresh' ) ) ];
+		return new WP_REST_Response( [ 'success' => true, 'data' => $this->core->get_gsc_post_metrics_map( $args ) ], 200 );
+	}
+
+	function rest_get_gsc_post_pulse( $request ) {
+		$post_id = (int) $request->get_param( 'post_id' );
+		if ( !$post_id ) {
+			return $this->error_response( 'Missing post_id', 'no_post_id' );
+		}
+		$days = $request->get_param( 'days' ) ? (int) $request->get_param( 'days' ) : 28;
+		return new WP_REST_Response( [ 'success' => true, 'data' => $this->core->get_gsc_post_pulse( $post_id, $days ) ], 200 );
+	}
+
+	function rest_get_gsc_breakdown( $request ) {
+		$params = $request->get_json_params();
+		$args = [
+			'days' => isset( $params['days'] ) ? (int) $params['days'] : 28,
+			'limit' => isset( $params['limit'] ) ? (int) $params['limit'] : 12,
+			'property' => isset( $params['property'] ) ? sanitize_text_field( $params['property'] ) : null,
+			'fresh' => !empty( $params['fresh'] ),
+		];
+		return new WP_REST_Response( [ 'success' => true, 'data' => $this->core->get_gsc_search_breakdown( $args ) ], 200 );
+	}
+
+	function rest_get_gsc_pages_with_issues( $request ) {
+		$params = $request->get_json_params();
+		$args = [
+			'days' => isset( $params['days'] ) ? (int) $params['days'] : 28,
+			'limit' => isset( $params['limit'] ) ? (int) $params['limit'] : 12,
+			'property' => isset( $params['property'] ) ? sanitize_text_field( $params['property'] ) : null,
+			'fresh' => !empty( $params['fresh'] ),
+		];
+		return new WP_REST_Response( [ 'success' => true, 'data' => $this->core->get_gsc_pages_with_issues( $args ) ], 200 );
 	}
 
 	function rest_toggle_gsc_tracked( $request ) {

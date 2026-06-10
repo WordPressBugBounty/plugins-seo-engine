@@ -502,6 +502,64 @@ class Meow_MWSEO_Modules_GoogleAnalytics
 		);
 	}
 
+	/**
+	 * Batched daily visitors for every page in ONE report (date x hostName x pagePath -> totalUsers).
+	 * Powers the per-post visitor sparklines in the Content SEO list without one API call per post.
+	 * Returns: [ ['date' => 'YYYY-MM-DD', 'host' => '...', 'path' => '/...', 'visitors' => int], ... ]
+	 */
+	public function get_pages_daily_visitors( $start_date = null, $end_date = null )
+	{
+		if ( !$this->is_authenticated() ) {
+			return array();
+		}
+		if ( !$start_date ) $start_date = date( 'Y-m-d', strtotime( '-30 days' ) );
+		if ( !$end_date )   $end_date   = date( 'Y-m-d' );
+
+		// Honour the Display Cache setting: this is a heavy report pulled on every list load, so
+		// caching it (12h) spares the GA4 API and quota. Recommended on for API-based sources.
+		$transient_key = self::TRANSIENT_REPORT_PREFIX . 'pages_daily_' . $this->property_id . '_' . md5( $start_date . '|' . $end_date );
+		if ( $this->use_cache ) {
+			$cached = get_transient( $transient_key );
+			if ( $cached !== false ) return $cached;
+		}
+
+		$request_data = array(
+			'dateRanges' => array( array( 'startDate' => $start_date, 'endDate' => $end_date ) ),
+			'dimensions' => array(
+				array( 'name' => 'date' ),
+				array( 'name' => 'hostName' ),
+				array( 'name' => 'pagePath' )
+			),
+			'metrics'    => array( array( 'name' => 'totalUsers' ) ),
+			'limit'      => 100000
+		);
+
+		$response = $this->make_google_analytics_request( 'runReport', $request_data );
+		if ( !$response || empty( $response['rows'] ) ) {
+			return array();
+		}
+
+		$out = array();
+		foreach ( $response['rows'] as $row ) {
+			$d        = isset( $row['dimensionValues'][0]['value'] ) ? $row['dimensionValues'][0]['value'] : ''; // YYYYMMDD
+			$host     = isset( $row['dimensionValues'][1]['value'] ) ? $row['dimensionValues'][1]['value'] : '';
+			$path     = isset( $row['dimensionValues'][2]['value'] ) ? $row['dimensionValues'][2]['value'] : '';
+			$visitors = isset( $row['metricValues'][0]['value'] ) ? (int) $row['metricValues'][0]['value'] : 0;
+			if ( strlen( $d ) !== 8 || $path === '' ) continue;
+			$out[] = array(
+				'date'     => substr( $d, 0, 4 ) . '-' . substr( $d, 4, 2 ) . '-' . substr( $d, 6, 2 ),
+				'host'     => $host,
+				'path'     => $path,
+				'visitors' => $visitors
+			);
+		}
+
+		if ( $this->use_cache ) {
+			set_transient( $transient_key, $out, 12 * HOUR_IN_SECONDS );
+		}
+		return $out;
+	}
+
 	public function get_top_posts( $args = array() )
 	{
 		if ( !$this->is_authenticated() ) {

@@ -2280,6 +2280,26 @@ class Meow_MWSEO_Core
 		return $this->pro->search_console->get_top_queries( $args );
 	}
 
+	function get_gsc_post_metrics_map( $args = [] ) {
+		if ( !$this->pro || !$this->pro->search_console ) return [];
+		return $this->pro->search_console->get_post_metrics_map( $args );
+	}
+
+	function get_gsc_search_breakdown( $args = [] ) {
+		if ( !$this->pro || !$this->pro->search_console ) return [ 'top_queries' => [], 'top_pages' => [] ];
+		return $this->pro->search_console->get_search_breakdown( $args );
+	}
+
+	function get_gsc_pages_with_issues( $args = [] ) {
+		if ( !$this->pro || !$this->pro->search_console ) return [];
+		return $this->pro->search_console->get_pages_with_issues( $args );
+	}
+
+	function get_gsc_post_pulse( $post_id, $days = 28 ) {
+		if ( !$this->pro || !$this->pro->search_console ) return null;
+		return $this->pro->search_console->get_post_pulse( (int) $post_id, $days );
+	}
+
 	function get_gsc_auth_url() {
 		if ( !$this->pro || !$this->pro->search_console ) {
 			return '';
@@ -2335,6 +2355,21 @@ class Meow_MWSEO_Core
 		}
 
 		return $this->analytics_module->get_post_analytics( $post_id, $page_path, $start_date, $end_date );
+	}
+
+	function get_posts_visitor_series( $post_ids, $days = 30 ) {
+		if ( !isset( $this->analytics_module ) ) {
+			return array();
+		}
+		return $this->analytics_module->get_posts_visitor_series( $post_ids, $days );
+	}
+
+	function get_google_analytics_pages_daily( $start_date = null, $end_date = null ) {
+		if ( !isset( $this->googleanalytics_module ) ) {
+			return array();
+		}
+		$this->googleanalytics_module->init();
+		return $this->googleanalytics_module->get_pages_daily_visitors( $start_date, $end_date );
 	}
 
 	// TODO [2025]: Refactor to unified analytics provider interface

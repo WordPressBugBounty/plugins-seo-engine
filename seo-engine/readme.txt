@@ -4,7 +4,7 @@ Tags: seo, redirection, sitemap, schema, analytics
 Donate link: https://www.patreon.com/meowapps
 Requires at least: 6.0
 Tested up to: 7.0
-Stable tag: 0.7.6
+Stable tag: 0.7.7
 Requires PHP: 7.4
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
@@ -259,6 +259,17 @@ SEO Engine works with Polylang, including post filtering and automatic AI langua
 No. The Redirections & 404 module handles URL redirects (301, 302, 307, 308, 410) and tracks 404s in one place. You can convert any 404 into a redirect with one click, and slug changes can be auto-redirected for you. Regex redirects are available in the Pro version.
 
 == Changelog ==
+
+= 0.7.7 (2026/06/10) =
+* Add: Per-post Google Search Console data throughout Content SEO, including row metrics, a Search pulse in the post editor, and a Search Visibility block on the dashboard.
+* Add: Redesigned post card with an audience panel showing AI bots, Search Console, and a 30-day visitors chart, plus a to-do issue list with in-place score spinner and Reset issues action.
+* Add: Language filter (Polylang/WPML) to Bulk SEO, matching the existing Content SEO filter.
+* Add: "Last insight" timestamp next to the Daily Insights refresh button.
+* Update: AI Content Intelligence checks are now gated behind Pro.
+* Update: Search Console tab reworked into actionable sections: pages with issues, top queries with landing pages, and most-visited pages with their top query.
+* Fix: Thin Content bulk list incorrectly showed "Will be hidden" on every row; unselected posts now correctly show as kept in search.
+* Fix: Bulk SEO "Generate all" and "Apply selected" actions could not be stopped once started; the progress bar stop button now works.
+* Fix: Reserved-height spinners added to the post card so Search and Visitors data no longer cause layout jumps while loading.
 
 = 0.7.6 (2026/06/03) =
 * Fix: Bulk SEO proposals not visible due to broken style variables.
