@@ -2101,6 +2101,9 @@ class Meow_MWSEO_Score {
 			update_post_meta( $post_id, '_mwseo_analysis', $result );
 		}
 
+		// A fresh analysis means fresh diagnoses; cached AI improvement plans are stale now.
+		delete_post_meta( $post_id, '_mwseo_improve_plans' );
+
 		return true;
 	}
 }

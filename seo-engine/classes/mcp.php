@@ -357,7 +357,7 @@ class Meow_MWSEO_MCP {
 
     $tools[] = [
       'name' => 'mwseo_bulk_seo_scan',
-      'description' => 'Run SEO analysis on multiple posts at once. More efficient than calling mwseo_do_seo_scan individually for each post. Useful for auditing entire categories, updating scores after SEO changes, or analyzing all posts of a specific type. Returns results for all posts with their individual scores.',
+      'description' => 'Refresh SEO scores for multiple posts at once using QUICK scans (fast baseline checks; existing AI results are preserved). This is the right tool after content fixes, when issue counts have gone stale. Each call processes at most 20 posts; extra IDs come back in "skipped" so you can chunk follow-up calls. For a full AI re-analysis of a single post, use mwseo_do_seo_scan instead.',
       'category' => 'SEO Engine',
       'accessLevel' => 'write',
       'inputSchema' => [
@@ -365,7 +365,7 @@ class Meow_MWSEO_MCP {
         'properties' => [
           'post_ids' => [
             'type' => 'array',
-            'description' => 'Array of WordPress post IDs to analyze. Example: [123, 456, 789]',
+            'description' => 'Array of WordPress post IDs to scan, max 20 per call (extras are returned in "skipped" for the next call). Example: [123, 456, 789]',
             'items' => [
               'type' => 'integer'
             ]
@@ -608,6 +608,11 @@ class Meow_MWSEO_MCP {
             'type' => 'string',
             'description' => 'Optional: Filter by specific bot name (e.g., "GPTBot", "ClaudeBot", "Google-Extended", "PerplexityBot"). Omit to see all bots. Case-sensitive exact match.'
           ],
+          'bot_type' => [
+            'type' => 'string',
+            'description' => 'Optional: Filter by bot category. "ai" = AI assistants, trainers and answer engines (GPTBot, ClaudeBot, PerplexityBot, Google-Extended...); "search" = classic search-index crawlers (Googlebot family, bingbot); "all" = no filter. One call replaces summing per-bot queries by hand.',
+            'enum' => ['ai', 'search', 'all']
+          ],
           'group_by' => [
             'type' => 'string',
             'description' => 'Optional: Time grouping for trend analysis. Options: "hour" (hourly breakdown), "day" (daily breakdown - most common), "week" (weekly aggregates), "month" (monthly aggregates). Omit for aggregates only without timeline.',
@@ -790,6 +795,32 @@ class Meow_MWSEO_MCP {
           'count' => [
             'type' => 'integer',
             'description' => 'Number of candidate titles to return. Default 3, max 10.',
+            'default' => 3
+          ]
+        ],
+        'required' => [ 'post_id' ]
+      ]
+    ];
+
+    $tools[] = [
+      'name' => 'mwseo_suggest_seo_excerpt',
+      'description' => 'Generate AI-written meta description candidates for a post. The single biggest fixable issue bucket on most sites is missing or mis-sized meta descriptions; this pairs with mwseo_set_seo_excerpt to fix them in bulk (suggest, pick, set, then re-scan in batches). Returns 3 candidates (configurable). Optionally pass target_query to steer toward a query the page ranks for. Requires AI Engine.',
+      'category' => 'SEO Engine',
+      'accessLevel' => 'read',
+      'inputSchema' => [
+        'type' => 'object',
+        'properties' => [
+          'post_id' => [
+            'type' => 'integer',
+            'description' => 'The post ID to suggest meta descriptions for.'
+          ],
+          'target_query' => [
+            'type' => 'string',
+            'description' => 'Optional. A search query the page should rank for. Candidates will naturally include this phrasing.'
+          ],
+          'count' => [
+            'type' => 'integer',
+            'description' => 'Number of candidates to return. Default 3, max 10.',
             'default' => 3
           ]
         ],
@@ -1340,12 +1371,29 @@ class Meow_MWSEO_MCP {
           }
           return [ 'success' => false, 'error' => 'Post not found' ];
           
-        case 'mwseo_bulk_seo_scan':
+        case 'mwseo_bulk_seo_scan': {
+          // Bulk runs QUICK scans: sub-second each, they refresh the failing-test counts after
+          // content fixes (the actual bulk use case) and preserve existing AI results. Full AI
+          // analysis takes seconds per post and times out in bulk, so it stays per-post via
+          // mwseo_do_seo_scan. The batch is capped and the rest handed back explicitly instead
+          // of timing out halfway with no explanation.
+          $requested = array_values( array_map( 'intval', (array) $args['post_ids'] ) );
+          $batch = array_slice( $requested, 0, 20 );
+          $skipped = array_slice( $requested, 20 );
           $results = [];
-          foreach ( $args['post_ids'] as $post_id ) {
-            $results[$post_id] = $this->api->do_seo_scan( $post_id );
+          foreach ( $batch as $post_id ) {
+            $post = get_post( $post_id );
+            $results[$post_id] = $post
+              ? $this->core->calculate_seo_score( $post, 'quick' )
+              : [ 'success' => false, 'message' => 'Post not found.' ];
           }
-          return [ 'success' => true, 'data' => $results ];
+          $response = [ 'success' => true, 'mode' => 'quick', 'data' => $results ];
+          if ( !empty( $skipped ) ) {
+            $response['skipped'] = $skipped;
+            $response['note'] = 'Only 20 posts are scanned per call to stay within HTTP timeouts. Call again with the skipped IDs. For a full AI re-analysis of one post, use mwseo_do_seo_scan.';
+          }
+          return $response;
+        }
           
         // Advanced SEO Tools
         case 'mwseo_get_posts_by_score_range':
@@ -1708,6 +1756,7 @@ class Meow_MWSEO_MCP {
             'end_date' => $args['end_date'] ?? null,
             'post_id' => $args['post_id'] ?? null,
             'bot_name' => $args['bot_name'] ?? null,
+            'bot_type' => $args['bot_type'] ?? null,
             'group_by' => $args['group_by'] ?? null,
             'metric' => $args['metric'] ?? 'visits'
           );
@@ -2016,6 +2065,62 @@ class Meow_MWSEO_MCP {
               'current_title' => $current_title,
               'candidates' => $candidates,
               'next_step' => sprintf( 'Pick a candidate and apply it with mwseo_set_seo_title post_id=%d title="<chosen>".', $post->ID )
+            ]
+          ];
+        }
+
+        case 'mwseo_suggest_seo_excerpt': {
+          if ( empty( $args['post_id'] ) ) {
+            return [ 'success' => false, 'error' => 'post_id is required.' ];
+          }
+          $post = get_post( (int) $args['post_id'] );
+          if ( !$post ) {
+            return [ 'success' => false, 'error' => 'Post not found.' ];
+          }
+          global $mwai;
+          if ( !$mwai ) {
+            return [ 'success' => false, 'error' => 'AI Engine is not available.' ];
+          }
+
+          $count = isset( $args['count'] ) ? max( 1, min( 10, (int) $args['count'] ) ) : 3;
+          $target_query = !empty( $args['target_query'] ) ? trim( (string) $args['target_query'] ) : '';
+          $current_excerpt = get_post_meta( $post->ID, $this->core->meta_key_seo_excerpt, true ) ?: $post->post_excerpt;
+          $language = $this->core->get_post_language_name( $post->ID );
+          $content_sample = wp_trim_words( strip_tags( $post->post_content ), 120 );
+
+          $query_line = $target_query !== ''
+            ? sprintf( 'The page should rank for: "%s". Include this phrasing naturally where it fits.', $target_query )
+            : '';
+
+          $prompt = sprintf(
+            "Write %d distinct meta description candidates for the post below. Each must:\n" .
+            "- Be 120 to 155 characters\n" .
+            "- Summarize the page's actual value and invite the click (no clickbait, no all-caps)\n" .
+            "- Avoid emoji and quotation marks\n" .
+            "%s\n" .
+            "\nPost title: %s\nCurrent meta description: %s\nPost content sample: %s\n\nReturn ONLY a JSON array of strings, nothing else.",
+            $count, $query_line, $post->post_title, ( $current_excerpt ?: '(none)' ), $content_sample
+          );
+          $prompt = sprintf( '<instructions>Reply ONLY with a JSON array of %d meta description strings in %s. No other text, no markdown fences.</instructions> <prompt>%s</prompt>', $count, $language, $prompt );
+
+          $raw = $mwai->simpleTextQuery( $prompt, [ 'scope' => 'seo' ] );
+          $raw = trim( (string) $raw );
+          $raw = preg_replace( '/^```(json)?\s*/m', '', $raw );
+          $raw = preg_replace( '/```\s*$/m', '', $raw );
+          $candidates = json_decode( trim( $raw ), true );
+          if ( !is_array( $candidates ) ) {
+            return [ 'success' => false, 'error' => 'AI returned an unparseable response.', '_raw' => substr( $raw, 0, 200 ) ];
+          }
+          $candidates = array_values( array_filter( array_map( 'trim', array_map( 'strval', $candidates ) ) ) );
+          $candidates = array_slice( $candidates, 0, $count );
+
+          return [
+            'success' => true,
+            'data' => [
+              'post_id' => $post->ID,
+              'current_excerpt' => $current_excerpt,
+              'candidates' => $candidates,
+              'next_step' => sprintf( 'Pick a candidate and apply it with mwseo_set_seo_excerpt post_id=%d excerpt="<chosen>".', $post->ID )
             ]
           ];
         }

@@ -4,7 +4,7 @@ Tags: seo, redirection, sitemap, schema, analytics
 Donate link: https://www.patreon.com/meowapps
 Requires at least: 6.0
 Tested up to: 7.0
-Stable tag: 0.7.8
+Stable tag: 0.8.0
 Requires PHP: 7.4
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
@@ -69,6 +69,7 @@ Your content is your SEO foundation. SEO Engine helps you write better, rank hig
 All the basics you need, without the bloat. Most SEO plugins bury essential features under endless settings. SEO Engine gets straight to the point—giving you settings only for what actually matters.
 
 * Smart Sitemaps
+* IndexNow (Bing, Yandex and Naver are pinged the moment you publish)
 * Robots.txt Editor
 * Canonical URLs
 * Meta Tags
@@ -168,8 +169,11 @@ Understand your traffic, monitor performance, all from your WordPress dashboard.
 * Visits, unique visitors, bounce rates
 * Top performing posts and pages
 * Traffic by country and source
+* Google Search Console: clicks, impressions and positions per post
 * Core Web Vitals from PageSpeed Insights
 * Real-time performance monitoring
+
+Referral spam and junk analytics rows are filtered out automatically, so the numbers you see are real humans.
 
 **AI Bot Tracking:**
 
@@ -181,8 +185,9 @@ Understand your traffic, monitor performance, all from your WordPress dashboard.
 == Pro Features ==
 
 * Magic Fix
+* Search Console Insights (per-post search data, quick wins, opportunity views)
+* Content Intelligence (AI checks for originality, completeness, readability)
 * WooCommerce AI
-* Search Engine Ranking
 * Advanced Analytics
 * Priority Support
 
@@ -258,7 +263,31 @@ SEO Engine works with Polylang, including post filtering and automatic AI langua
 
 No. The Redirections & 404 module handles URL redirects (301, 302, 307, 308, 410) and tracks 404s in one place. You can convert any 404 into a redirect with one click, and slug changes can be auto-redirected for you. Regex redirects are available in the Pro version.
 
+= Does SEO Engine support IndexNow? =
+
+Yes, and it is fully automatic. When you publish or update a post, SEO Engine instantly notifies Bing, Yandex, Naver and every IndexNow-compatible engine, so your content gets crawled right away instead of waiting. The verification key is generated and served for you; there is nothing to configure. Note that Google does not use IndexNow and keeps reading your sitemap instead.
+
 == Changelog ==
+
+= 0.8.0 (2026/06/14) =
+* Fix: Dashboard Search Visibility and Movers now query the active Search Console property, so multi-property sites no longer show empty stats.
+
+= 0.7.9 (2026/06/14) =
+* Update: Removed the Search Visibility ranking tracker and its Reverse Search companion, as Google closed the underlying API to new customers.
+* Add: IndexNow support — publishing or updating a post now instantly notifies Bing, Yandex, and Naver, with a single toggle under Technical SEO (on by default).
+* Add: Opportunity filters (Quick Wins, Low CTR, Invisible) and audience sorting (impressions, clicks, position, visitors, AI bots) to Content SEO.
+* Fix: Google Search Console no longer auto-selects an unrelated property on agency accounts; it now only picks one matching the site's own domain.
+* Fix: Analytics now filters out referral spam and drops GA4's "(not set)" and empty-host rows that inflated reports with fake visits.
+* Add: A bot_type filter (ai, search, all) to bot traffic queries and the MCP tool, so a single call can answer how much AI traffic a site gets.
+* Update: Published posts are now quietly re-scanned a few seconds after each save so scores no longer go stale, and the bulk scan MCP tool runs fast quick scans capped at 20 posts.
+* Add: New mwseo_suggest_seo_excerpt MCP tool lets AI agents batch-fill missing meta descriptions.
+* Update: Redesigned the dashboard with a Movers block, compact AI bots snapshot with analytics modal, Search Console visibility chart, and moved module toggles into Settings.
+* Update: Rebuilt the Search Console tab around a weekly workflow with a performance chart, switchable opportunities workspace, and compact top-queries list.
+* Update: Condensed the Content SEO toolbar and header into a single calm toolbar with overflow menu, and moved filter views and opportunity chips to the bottom bar.
+* Update: Refreshed the readme to replace the retired Search Engine Ranking with Search Console Insights and Content Intelligence, and documented IndexNow and referral-spam filtering.
+* 🎵 Discuss with others about Seo Engine on [the Discord](https://discord.gg/bHDGh38).
+* 🌴 Keep us motivated with [a little review here](https://wordpress.org/support/plugin/seo-engine/reviews/). Thank you!
+* 🥰 If you want to help us, check our [Patreon](https://www.patreon.com/meowapps). Thank you!
 
 = 0.7.8 (2026/06/10) =
 * Fix: Visitors panel now shows "No visits in the last 30 days" instead of empty bars on posts with no traffic.

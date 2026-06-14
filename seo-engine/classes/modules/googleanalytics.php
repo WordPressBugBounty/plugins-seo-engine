@@ -546,6 +546,8 @@ class Meow_MWSEO_Modules_GoogleAnalytics
 			$path     = isset( $row['dimensionValues'][2]['value'] ) ? $row['dimensionValues'][2]['value'] : '';
 			$visitors = isset( $row['metricValues'][0]['value'] ) ? (int) $row['metricValues'][0]['value'] : 0;
 			if ( strlen( $d ) !== 8 || $path === '' ) continue;
+			// Noise hosts would otherwise sneak into posts via the host-agnostic path fallback.
+			if ( $this->is_noise_host( $host ) ) continue;
 			$out[] = array(
 				'date'     => substr( $d, 0, 4 ) . '-' . substr( $d, 4, 2 ) . '-' . substr( $d, 6, 2 ),
 				'host'     => $host,
@@ -789,6 +791,14 @@ class Meow_MWSEO_Modules_GoogleAnalytics
 		return $decoded_response;
 	}
 
+	// GA4 emits "(not set)" / empty hostName rows (cookieless hits, proxies, some spam). They
+	// carry no usable traffic, often show 100% bounce with 0 pageviews, and poison the "all"
+	// aggregate, so every transform below drops them.
+	private function is_noise_host( $host ) {
+		$host = strtolower( trim( (string) $host ) );
+		return $host === '' || $host === '(not set)' || $host === 'localhost';
+	}
+
 	private function transform_analytics_data( $response, $args ) {
 		$data = array();
 		$daily_totals = array();
@@ -799,9 +809,12 @@ class Meow_MWSEO_Modules_GoogleAnalytics
 
 		// First, gather data for individual hosts and simultaneously calculate daily totals.
 		foreach ( $response['rows'] as $row ) {
-			
+
 			$date_raw = $row['dimensionValues'][0]['value'];
 			$host = isset( $row['dimensionValues'][1]['value'] ) ? $row['dimensionValues'][1]['value'] : '';
+			if ( $this->is_noise_host( $host ) ) {
+				continue;
+			}
 
 			// The date is in YYYYMMDD format, convert it to YYYY-MM-DD
 			$year  = substr( $date_raw, 0, 4 );
@@ -909,7 +922,7 @@ class Meow_MWSEO_Modules_GoogleAnalytics
 			return array();
 		}
 
-		$rows_count = count( $response['rows'] );
+		$rows_count = 0;
 		$data = array();
 		$all = array(
 			'total_visits'    => 0,
@@ -925,6 +938,10 @@ class Meow_MWSEO_Modules_GoogleAnalytics
 		foreach ( $response['rows'] as $row ) {
 
 			$host                 = isset( $row['dimensionValues'][0]['value'] ) ? $row['dimensionValues'][0]['value'] : '';
+			if ( $this->is_noise_host( $host ) ) {
+				continue;
+			}
+			$rows_count++;
 
 			$sessions             = isset( $row['metricValues'][0]['value'] )    ? (int) $row['metricValues'][0]['value'] : 0;
 			$users                = isset( $row['metricValues'][1]['value'] )    ? (int) $row['metricValues'][1]['value'] : 0;
@@ -979,12 +996,15 @@ class Meow_MWSEO_Modules_GoogleAnalytics
 		}
 
 		foreach ( $response['rows'] as $row ) {
-			
+
 			// Dimensions
 			$page_path  = $row['dimensionValues'][0]['value'];
 			$page_title = $row['dimensionValues'][1]['value'];
 			$country    = isset( $row['dimensionValues'][2]['value'] ) ? $row['dimensionValues'][2]['value'] : '';
 			$host 	    = isset( $row['dimensionValues'][3]['value'] ) ? $row['dimensionValues'][3]['value'] : '';
+			if ( $this->is_noise_host( $host ) ) {
+				continue;
+			}
 
 			// Metrics 
 			$sessions   = isset( $row['metricValues'][0]['value'] ) ? (int) $row['metricValues'][0]['value'] : 0;

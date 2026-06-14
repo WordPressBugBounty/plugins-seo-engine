@@ -34,10 +34,12 @@ class Meow_MWSEO_Core
 
 		add_action( 'plugins_loaded', array( $this, 'init' ) );
 
-		$analyze_on_update = $this->get_option( 'analyze_on_update', 'none' );
+		$analyze_on_update = $this->get_option( 'analyze_on_update', 'quick' );
 		if ( $analyze_on_update !== 'none' && $analyze_on_update !== false ) {
 			add_action( 'save_post', array( $this, 'analyze_on_update' ), 10, 3 );
 		}
+		// Always registered so events scheduled before a settings change still run.
+		add_action( 'mwseo_analyze_post_event', array( $this, 'run_scheduled_analysis' ), 10, 2 );
 	}
 
 	function init() {
@@ -130,6 +132,11 @@ class Meow_MWSEO_Core
 		// Redirects + 404 monitor
 		if ( class_exists( 'Meow_MWSEO_Modules_Redirects' ) ) {
 			$this->redirects_module = new Meow_MWSEO_Modules_Redirects( $this );
+		}
+
+		// IndexNow (instant indexing pings on publish/update)
+		if ( class_exists( 'Meow_MWSEO_Modules_IndexNow' ) ) {
+			$this->indexnow_module = new Meow_MWSEO_Modules_IndexNow( $this );
 		}
 
 		// MCP integration - check both class and global variable
@@ -369,13 +376,28 @@ class Meow_MWSEO_Core
 		}
 	}
 
+	// Keeps scores and issue counts fresh after edits: instead of analyzing inline (which
+	// would slow every save, badly so in full mode with AI checks), schedule a one-off cron
+	// event a few seconds later. Only re-analyzes posts that already have an analysis, so a
+	// brand new draft is never surprise-scanned.
 	function analyze_on_update( $post_id, $post, $update ) {
-		global $mwseo_score;
-		if ( $mwseo_score ) {
-			$analyze_on_update = $this->get_option( 'analyze_on_update', 'none' );
-			// Determine analysis type: 'quick' or 'full'
-			$analysis_type = ( $analyze_on_update === 'quick' ) ? 'quick' : 'full';$this->calculate_seo_score( $post, $analysis_type );
+		if ( wp_is_post_revision( $post_id ) || wp_is_post_autosave( $post_id ) ) return;
+		if ( !$post || $post->post_status !== 'publish' ) return;
+		$public_types = get_post_types( array( 'public' => true ) );
+		if ( !in_array( $post->post_type, $public_types, true ) ) return;
+		if ( empty( get_post_meta( $post_id, '_mwseo_analysis', true ) ) ) return;
+
+		$analyze_on_update = $this->get_option( 'analyze_on_update', 'quick' );
+		$analysis_type = ( $analyze_on_update === 'full' ) ? 'full' : 'quick';
+		if ( !wp_next_scheduled( 'mwseo_analyze_post_event', array( $post_id, $analysis_type ) ) ) {
+			wp_schedule_single_event( time() + 10, 'mwseo_analyze_post_event', array( $post_id, $analysis_type ) );
 		}
+	}
+
+	function run_scheduled_analysis( $post_id, $analysis_type = 'quick' ) {
+		$post = get_post( $post_id );
+		if ( !$post || $post->post_status !== 'publish' ) return;
+		$this->calculate_seo_score( $post, $analysis_type === 'full' ? 'full' : 'quick' );
 	}
 
 
@@ -1060,7 +1082,6 @@ class Meow_MWSEO_Core
 			$options['ai_magic_fix'] = false;
 			$options['ai_auto_correct'] = false;
 			$options['ai_magic_wand'] = false;
-			$options['ai_web_scraping'] = false;
 			$options['ai_keywords'] = false;
 			$options['woocommerce_assistant'] = false;
 		}
@@ -1075,6 +1096,7 @@ class Meow_MWSEO_Core
 			$options['social_networks'] = false;
 			$options['robot_editor'] = false;
 			$options['llms_editor'] = false;
+			$options['indexnow'] = false;
 		}
 
 		// Return sanitized options WITHOUT persisting to database
@@ -1101,11 +1123,15 @@ class Meow_MWSEO_Core
 			'select_post_types' => ['post', 'page'],
 			'readability_treshold' => 50,
 			'language' => $this->get_language_name( get_locale() ) ?? 'English',
-			'analyze_on_update' => 'none',
+			// 'quick' keeps scores fresh after edits (non-AI baseline, scheduled off-request);
+			// 'full' also re-runs the AI checks; 'none' lets counts go stale until a manual scan.
+			'analyze_on_update' => 'quick',
 			'analyze_buffer' => 1,
 			'analyze_buffer_interval' => 0,
 			
 			// Technical SEO
+			'indexnow' => true,
+			'indexnow_key' => '',
 			'sitemap' => false,
 			'disable_wp_sitemap' => false,
 			'sitemap_custom' => false,
@@ -1129,16 +1155,9 @@ class Meow_MWSEO_Core
 			'social_networks_twitter' => '',
 			'social_networks_facebook_app_id' => '',
 			
-			// Search Visibility
-			'google_ranking' => false,
-			
-			// Google Cloud / API
+			// Google Cloud / API (shared: used by Speed & Vitals / PageSpeed Insights)
 			'google_api_key' => '',
-			'google_programmable_search_engine' => '',
-			'google_interval_hours' => 24,
-			'google_search_depth' => 3,
-			'google_track_points' => 60,
-			
+
 			// Analytics Configuration
 			'analytics_method' => 'none', // 'none', 'private', 'google'
 			
@@ -1182,7 +1201,6 @@ class Meow_MWSEO_Core
 			'ai_magic_fix' => false,
 			'ai_auto_correct' => false,
 			'ai_magic_wand' => false,
-			'ai_web_scraping' => false,
 			'ai_keywords' => false,
 			'ai_semantic_analysis' => true, // Enable AI semantic analysis (requires AI Engine)
 			'full_analysis' => true, // Enable Full Analysis with Intelligence checks
@@ -1317,13 +1335,6 @@ class Meow_MWSEO_Core
 		if ( $old_title_hashes !== false ) {
 			update_option( 'mwseo_title_hashes', $old_title_hashes );
 			delete_option( 'seo_engine_title_hashes' );
-		}
-		
-		// Migrate searches (from premium module)
-		$old_searches = get_option( 'seo_engine_searches' );
-		if ( $old_searches !== false ) {
-			update_option( 'mwseo_searches', $old_searches );
-			delete_option( 'seo_engine_searches' );
 		}
 		
 		// Add any other native options that need migration here
@@ -2265,6 +2276,16 @@ class Meow_MWSEO_Core
 		return $this->pro->search_console->get_summary( $args );
 	}
 
+	function get_gsc_timeseries( $args = [] ) {
+		if ( !$this->pro || !$this->pro->search_console ) return [];
+		return $this->pro->search_console->get_timeseries( $args );
+	}
+
+	function get_gsc_page_movers( $args = [] ) {
+		if ( !$this->pro || !$this->pro->search_console ) return [];
+		return $this->pro->search_console->get_page_movers( $args );
+	}
+
 	function get_gsc_quick_wins( $args = [] ) {
 		if ( !$this->pro || !$this->pro->search_console ) return [];
 		return $this->pro->search_console->get_quick_wins( $args );
@@ -2283,6 +2304,11 @@ class Meow_MWSEO_Core
 	function get_gsc_post_metrics_map( $args = [] ) {
 		if ( !$this->pro || !$this->pro->search_console ) return [];
 		return $this->pro->search_console->get_post_metrics_map( $args );
+	}
+
+	function estimate_gsc_quick_win_potential( $impressions, $position ) {
+		if ( !$this->pro || !$this->pro->search_console ) return 0;
+		return $this->pro->search_console->estimate_quick_win_potential( $impressions, $position );
 	}
 
 	function get_gsc_search_breakdown( $args = [] ) {
@@ -2362,6 +2388,13 @@ class Meow_MWSEO_Core
 			return array();
 		}
 		return $this->analytics_module->get_posts_visitor_series( $post_ids, $days );
+	}
+
+	function get_posts_visitor_totals( $post_ids, $days = 30 ) {
+		if ( !isset( $this->analytics_module ) ) {
+			return array();
+		}
+		return $this->analytics_module->get_posts_visitor_totals( $post_ids, $days );
 	}
 
 	function get_google_analytics_pages_daily( $start_date = null, $end_date = null ) {

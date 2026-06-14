@@ -24,9 +24,6 @@ spl_autoload_register(function ( $class ) {
     else if ( strpos( $class, 'MeowKitPro_MWSEO_' ) !== false ) {
       $file = MWSEO_PATH . '/common/premium/' . str_replace( 'meowkitpro_mwseo_', '', strtolower( $class ) ) . '.php';
     }
-    else if ( strpos( $class, 'MeowPro_MWSEO_Ranks' ) !== false ) {
-      $file = MWSEO_PATH . '/premium/ranks/' . str_replace( 'meowpro_mwseo_ranks_', '', strtolower( $class ) ) . '.php';
-    }
     else if ( strpos( $class, 'MeowPro_MWSEO_' ) !== false ) {
       $file = MWSEO_PATH . '/premium/' . str_replace( 'meowpro_mwseo_', '', strtolower( $class ) ) . '.php';
     }

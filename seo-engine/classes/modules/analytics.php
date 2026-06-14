@@ -315,6 +315,12 @@ class Meow_MWSEO_Modules_Analytics
 		$user_ip = $this->get_user_ip();
 		$user_agent = $_SERVER['HTTP_USER_AGENT'] ?? '';
 		$referer = $_SERVER['HTTP_REFERER'] ?? '';
+
+		// Referral spam fakes the referer to plant its domain in your reports; don't record it.
+		if ( $this->is_spam_referer( $referer ) ) {
+			return false;
+		}
+
 		$is_logged_in = is_user_logged_in() ? 1 : 0;
 		$user_id = $this->get_current_user_id();
 		// Generate session-like ID without starting PHP sessions (which break caching)
@@ -461,6 +467,61 @@ class Meow_MWSEO_Modules_Analytics
 		return false;
 	}
 
+	// Splits the tracked bot list into meaningful groups: classic search-index crawlers,
+	// link-preview bots, and everything else (AI assistants, trainers, answer engines).
+	public function get_bots_by_type( $type )
+	{
+		$search = array( 'Googlebot-Image', 'Googlebot-News', 'Googlebot-Video', 'Googlebot-Mobile', 'Googlebot', 'bingbot' );
+		$preview = array( 'Slackbot', 'FacebookBot', 'meta-webindexer' );
+		if ( $type === 'search' ) return $search;
+		if ( $type === 'ai' ) return array_values( array_diff( $this->ai_agents, $search, $preview ) );
+		return $this->ai_agents;
+	}
+
+	// Known referral-spam domains: these bots fake the Referer header to plant their domain
+	// in your reports, polluting every aggregate. Extensible via the mwseo_spam_referrers filter.
+	private function get_spam_referrers()
+	{
+		$spam = array(
+			'trafficheap.cc', 'semalt.com', 'buttons-for-website.com', 'best-seo-offer.com',
+			'100dollars-seo.com', 'success-seo.com', 'videos-for-your-business.com',
+			'seo-platform.com', 'rankings-analytics.com', 'event-tracking.com',
+			'free-share-buttons.com', 'get-free-traffic-now.com', 'trafficbot.life',
+			'bottraffic.live', 'traffic2cash.xyz', 'site-auditor.online',
+		);
+		return apply_filters( 'mwseo_spam_referrers', $spam );
+	}
+
+	private function is_spam_referer( $referer )
+	{
+		if ( empty( $referer ) ) return false;
+		$host = strtolower( (string) parse_url( $referer, PHP_URL_HOST ) );
+		if ( $host === '' ) return false;
+		$host = preg_replace( '/^www\./', '', $host );
+		foreach ( $this->get_spam_referrers() as $domain ) {
+			if ( $host === $domain || substr( $host, -strlen( '.' . $domain ) ) === '.' . $domain ) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	// SQL fragment excluding visits whose stored referer is on the spam blocklist, so reports
+	// stay honest even for visits recorded before the record-time filter existed.
+	// $column is internal only (fixed values like 'referer' / 'a.referer'), never user input.
+	private function spam_referer_sql( $column = 'referer' )
+	{
+		global $wpdb;
+		$parts = array();
+		foreach ( $this->get_spam_referrers() as $domain ) {
+			$parts[] = $wpdb->prepare( "$column NOT LIKE %s", '%' . $wpdb->esc_like( $domain ) . '%' );
+		}
+		if ( empty( $parts ) ) return '1=1';
+		// NULL-safe: "NULL NOT LIKE x" is NULL (falsy), which would silently drop
+		// direct visits that have no referer at all.
+		return "($column IS NULL OR $column = '' OR (" . implode( ' AND ', $parts ) . '))';
+	}
+
 	// TODO [2025]: Refactor to unified analytics provider interface
 	public function get_analytics_data( $args = array() )
 	{
@@ -477,7 +538,7 @@ class Meow_MWSEO_Modules_Analytics
 		$args = wp_parse_args( $args, $defaults );
 
 		// So we can construct the WHERE clause dynamically
-		$where_conditions = array( '1=1' );
+		$where_conditions = array( $this->spam_referer_sql() );
 		$where_values = array();
 
 		if ( $args['post_id'] ) {
@@ -551,7 +612,7 @@ class Meow_MWSEO_Modules_Analytics
 			default:
 				global $wpdb;
 
-				$where_conditions = array( 'a.post_id = %d' );
+				$where_conditions = array( 'a.post_id = %d', $this->spam_referer_sql( 'a.referer' ) );
 				$where_values = array( $post_id );
 
 				if ( $start_date ) {
@@ -635,9 +696,10 @@ class Meow_MWSEO_Modules_Analytics
 		else if ( $method === 'private' ) {
 			global $wpdb;
 			$placeholders = implode( ',', array_fill( 0, count( $post_ids ), '%d' ) );
+			$spam_sql = $this->spam_referer_sql();
 			$sql = "SELECT post_id, DATE(visit_date) AS d, COUNT(DISTINCT user_ip) AS visitors
 				FROM {$this->table_name}
-				WHERE post_id IN ($placeholders) AND visit_date >= %s AND visit_date <= %s
+				WHERE post_id IN ($placeholders) AND visit_date >= %s AND visit_date <= %s AND $spam_sql
 				GROUP BY post_id, DATE(visit_date)";
 			$params = array_merge( $post_ids, array( $start . ' 00:00:00', $end . ' 23:59:59' ) );
 			$db_rows = $wpdb->get_results( $wpdb->prepare( $sql, $params ), ARRAY_A );
@@ -656,6 +718,21 @@ class Meow_MWSEO_Modules_Analytics
 			$out[ $pid ] = $points;
 		}
 		return $out;
+	}
+
+	// Visitor totals per post over the window, for sorting the posts list by traffic.
+	// Sums the same daily series the row chart shows, so the sorted order always matches
+	// the numbers the user is looking at.
+	public function get_posts_visitor_totals( $post_ids, $days = 30 )
+	{
+		$series = $this->get_posts_visitor_series( $post_ids, $days );
+		$totals = array();
+		foreach ( $series as $pid => $points ) {
+			$sum = 0;
+			foreach ( $points as $p ) { $sum += (int) $p['visitors']; }
+			$totals[ $pid ] = $sum;
+		}
+		return $totals;
 	}
 
 	private function normalize_visitor_path( $path )
@@ -698,7 +775,7 @@ class Meow_MWSEO_Modules_Analytics
 				// Private Analytics (original implementation)
 				global $wpdb;
 
-				$where_conditions = array( '1=1' );
+				$where_conditions = array( $this->spam_referer_sql( 'a.referer' ) );
 				$where_values = array();
 
 				if ( $args['start_date'] ) {
@@ -757,7 +834,7 @@ class Meow_MWSEO_Modules_Analytics
 				// Private Analytics (original implementation)
 				global $wpdb;
 
-				$where_conditions = array( '1=1' );
+				$where_conditions = array( $this->spam_referer_sql() );
 				$where_values = array();
 
 				if ( $start_date ) {
@@ -848,19 +925,22 @@ class Meow_MWSEO_Modules_Analytics
 
 		$where_clause = implode( ' AND ', $where_conditions );
 
+		// Aggregate per page so view counts are true totals over the whole period. A raw
+		// LIMIT'd row dump made every page look like "1 view" once the period got large,
+		// because only the most recent visits (one per page) fit under the cap.
 		$sql = "SELECT
-			a.id,
 			a.post_id,
-			a.visit_date,
 			a.page_url,
-			a.user_agent,
+			COUNT(*) as views,
+			MAX(a.visit_date) as last_visit,
 			p.post_title,
 			p.post_type
 			FROM $this->ai_agents_table a
 			LEFT JOIN {$wpdb->posts} p ON a.post_id = p.ID
 			WHERE $where_clause
-			ORDER BY visit_date DESC
-			LIMIT 100";
+			GROUP BY a.post_id, a.page_url, p.post_title, p.post_type
+			ORDER BY views DESC
+			LIMIT 200";
 
 		$query = $wpdb->prepare( $sql, ...$where_values );
 		return $wpdb->get_results( $query, ARRAY_A );
@@ -954,6 +1034,7 @@ class Meow_MWSEO_Modules_Analytics
 			'end_date' => date( 'Y-m-d' ),
 			'post_id' => null,
 			'bot_name' => null,
+			'bot_type' => null,
 			'group_by' => null,
 			'metric' => 'visits'
 		);
@@ -963,6 +1044,18 @@ class Meow_MWSEO_Modules_Analytics
 		// Build WHERE clause
 		$where_conditions = array( '1=1' );
 		$where_values = array();
+
+		// Bot type filter: 'ai' (assistants, training and answer-engine crawlers) vs 'search'
+		// (classic index crawlers). Without this, the table mixes GPTBot with Googlebot and a
+		// "how much AI traffic do I get" question needed one query per bot name.
+		if ( $args['bot_type'] && $args['bot_type'] !== 'all' ) {
+			$names = $this->get_bots_by_type( $args['bot_type'] );
+			if ( !empty( $names ) ) {
+				$placeholders = implode( ',', array_fill( 0, count( $names ), '%s' ) );
+				$where_conditions[] = "bot_name IN ($placeholders)";
+				$where_values = array_merge( $where_values, $names );
+			}
+		}
 
 		if ( $args['start_date'] ) {
 			$where_conditions[] = 'visit_date >= %s';

@@ -3,17 +3,13 @@
 class Meow_MWSEO_Rest
 {
 	private $core = null;
-	private $rank = null;
 	private $namespace = 'seo-engine/v1';
-	
+
 	public function __construct( $core, $admin ) {
 		if ( !current_user_can( 'administrator' ) ) {
 			return;
 		}
 		$this->core = $core;
-		if ( class_exists( 'MeowPro_MWSEO_Ranks_Core' ) ) {
-			$this->rank = new MeowPro_MWSEO_Ranks_Core( $this->core );
-		}
 		add_action( 'rest_api_init', array( $this, 'rest_api_init' ) );
 	}
 
@@ -277,25 +273,6 @@ class Meow_MWSEO_Rest
 
 			#endregion
 
-			#region REST Google Ranking
-			register_rest_route( $this->namespace, '/fetch_searches', array(
-				'methods' => 'GET',
-				'permission_callback' => array( $this->core, 'can_access_settings' ),
-				'callback' => array( $this, 'rest_fetch_searches' )
-			) );
-			register_rest_route( $this->namespace, '/save_search', array(
-				'methods' => 'POST',
-				'permission_callback' => array( $this->core, 'can_access_settings' ),
-				'callback' => array( $this, 'rest_save_search' )
-			) );
-			register_rest_route( $this->namespace, '/delete_search', array(
-				'methods' => 'POST',
-				'permission_callback' => array( $this->core, 'can_access_settings' ),
-				'callback' => array( $this, 'rest_delete_search' )
-			) );
-
-			#endregion
-
 			#region REST Performance Insights
 			register_rest_route( $this->namespace, '/get_insights', array(
 				'methods' => 'POST',
@@ -360,11 +337,6 @@ class Meow_MWSEO_Rest
 				'permission_callback' => array( $this->core, 'can_access_settings' ),
 				'callback' => array( $this, 'rest_ai_suggest' )
 			) );
-			register_rest_route( $this->namespace, '/ai_web_scraping', array(
-				'methods' => 'POST',
-				'permission_callback' => array( $this->core, 'can_access_settings' ),
-				'callback' => array( $this, 'rest_ai_web_scraping' )
-			) );
 			register_rest_route( $this->namespace, '/magic_fix_generate', array(
 				'methods' => 'POST',
 				'permission_callback' => array( $this->core, 'can_access_settings' ),
@@ -396,6 +368,11 @@ class Meow_MWSEO_Rest
 				'methods' => 'POST',
 				'permission_callback' => array( $this->core, 'can_access_settings' ),
 				'callback' => array( $this, 'rest_magic_fix_internal_links_step4' )
+			) );
+			register_rest_route( $this->namespace, '/ai_improvement_plan', array(
+				'methods' => 'POST',
+				'permission_callback' => array( $this->core, 'can_access_settings' ),
+				'callback' => array( $this, 'rest_ai_improvement_plan' )
 			) );
 
 			register_rest_route( $this->namespace, '/generate_daily_insight', array(
@@ -531,6 +508,16 @@ class Meow_MWSEO_Rest
 				'methods' => 'POST',
 				'permission_callback' => array( $this->core, 'can_access_settings' ),
 				'callback' => array( $this, 'rest_toggle_gsc_tracked' )
+			) );
+			register_rest_route( $this->namespace, '/google-search-console/timeseries', array(
+				'methods' => 'POST',
+				'permission_callback' => array( $this->core, 'can_access_settings' ),
+				'callback' => array( $this, 'rest_get_gsc_timeseries' )
+			) );
+			register_rest_route( $this->namespace, '/google-search-console/movers', array(
+				'methods' => 'POST',
+				'permission_callback' => array( $this->core, 'can_access_settings' ),
+				'callback' => array( $this, 'rest_get_gsc_movers' )
 			) );
 			register_rest_route( $this->namespace, '/google-search-console/summary', array(
 				'methods' => 'POST',
@@ -927,7 +914,10 @@ class Meow_MWSEO_Rest
 
 		$search = isset($params['search']) ? $params['search'] : null;
 		$filter = isset($params['filterBy']) ? $params['filterBy'] : null;
-		$show_all = $filter == 'all';
+		// Opportunity views are metric-based (Search Console), not status-based: they see
+		// every non-skipped post and get filtered after the rows are enriched below.
+		$opportunity = in_array( $filter, ['quick_wins', 'low_ctr', 'invisible'], true ) ? $filter : null;
+		$show_all = $filter == 'all' || $opportunity !== null;
 		$filter = $show_all ? null : $filter;
 
 		// Get language filter
@@ -1014,6 +1004,33 @@ class Meow_MWSEO_Rest
 		$excluded_posts = $this->core->get_option( 'sitemap_excluded_post_ids', [] );
 		$excluded_posts = array_map( 'intval', $excluded_posts );
 
+		// ---- Audience metrics (Search Console) ----
+		// Fetched before the loop so rows are enriched and opportunity views are counted in one
+		// pass. cached_only: the list never blocks on a cold GSC round trip; a live call is only
+		// allowed when the user explicitly picks a metric sort or an opportunity view.
+		$accessor = isset( $sort['accessor'] ) ? $sort['accessor'] : null;
+		$needs_gsc_live = in_array( $accessor, ['impressions', 'clicks', 'position'], true ) || $opportunity !== null;
+		$gsc_map = $this->core->get_gsc_post_metrics_map( $needs_gsc_live ? [] : [ 'cached_only' => true ] );
+		$has_gsc_data = !empty( $gsc_map );
+
+		// One rule set shared by the per-post counting below and the view filtering after the loop.
+		$opportunity_match = function( $view, $g, $no_index ) {
+			if ( $view === 'invisible' ) {
+				// No-index posts are invisible on purpose; don't flag them.
+				return !$no_index && ( empty( $g ) || (int) $g['impressions'] === 0 );
+			}
+			if ( empty( $g ) ) return false;
+			if ( $view === 'quick_wins' ) {
+				return $g['position'] >= 5 && $g['position'] <= 15 && $g['impressions'] >= 50;
+			}
+			if ( $view === 'low_ctr' ) {
+				return $g['impressions'] >= 100 && $g['position'] <= 12 && $g['ctr_pct'] < 1.0;
+			}
+			return false;
+		};
+		$opportunity_counts = [ 'quick_wins' => 0, 'low_ctr' => 0, 'invisible' => 0 ];
+		$quick_wins_potential = 0;
+
 		$data = [];
 		foreach ($posts as $post) {
 			// Migrate old meta keys to new ones (runs once per post)
@@ -1041,6 +1058,21 @@ class Meow_MWSEO_Rest
 			$total_counts[$status]++;
 			if ($status !== 'skip') {
 				$total_counts['all']++;
+			}
+
+			// Opportunity view counts cover every non-skipped post, whatever filter is active,
+			// so the chips always show the library-wide picture.
+			$gsc_row = isset( $gsc_map[ $post->ID ] ) ? $gsc_map[ $post->ID ] : null;
+			$no_index = in_array( $post->ID, $excluded_posts );
+			if ( $has_gsc_data && $status !== 'skip' ) {
+				foreach ( [ 'quick_wins', 'low_ctr', 'invisible' ] as $view ) {
+					if ( $opportunity_match( $view, $gsc_row, $no_index ) ) {
+						$opportunity_counts[ $view ]++;
+						if ( $view === 'quick_wins' ) {
+							$quick_wins_potential += $this->core->estimate_gsc_quick_win_potential( $gsc_row['impressions'], $gsc_row['position'] );
+						}
+					}
+				}
 			}
 
 			// Apply filter (All excludes skip)
@@ -1081,21 +1113,47 @@ class Meow_MWSEO_Rest
 				'ignored_tests' => is_array($ignored_tests) ? $ignored_tests : [],
 				'fixed' => is_array($magic_fixes_applied) ? $magic_fixes_applied : [],
 				'ai_agents' => $ai_agents_data,
-				'no_index' => in_array($post->ID, $excluded_posts),
+				'ai_bots_total' => is_array( $ai_agents_data['grouped'] ?? null ) ? array_sum( $ai_agents_data['grouped'] ) : 0,
+				'gsc' => $gsc_row,
+				'no_index' => $no_index,
 				'canonical_url' => get_post_meta($post->ID, '_mwseo_canonical', true),
 			];
 		}
 
 		wp_reset_postdata();
 
+		// Visitor totals are only needed for the visitors sort (one batched, cached query).
+		if ( $accessor === 'visitors' ) {
+			$visitor_totals = $this->core->get_posts_visitor_totals( array_column( $data, 'id' ), 30 );
+			foreach ( $data as &$row ) {
+				$row['visitors_30d'] = isset( $visitor_totals[ $row['id'] ] ) ? (int) $visitor_totals[ $row['id'] ] : 0;
+			}
+			unset( $row );
+		}
+
+		// ---- Opportunity views (thresholds match the Search Console Quick Wins logic) ----
+		if ( $opportunity !== null ) {
+			$data = array_values( array_filter( $data, function( $row ) use ( $opportunity, $opportunity_match ) {
+				return $opportunity_match( $opportunity, $row['gsc'], !empty( $row['no_index'] ) );
+			} ) );
+		}
+
+		// Library-wide opportunity counts for the view chips (null when GSC has no data yet).
+		$total_counts['opportunities'] = $has_gsc_data ? [
+			'quick_wins' => $opportunity_counts['quick_wins'],
+			'low_ctr' => $opportunity_counts['low_ctr'],
+			'invisible' => $opportunity_counts['invisible'],
+			'quick_wins_potential' => (int) $quick_wins_potential,
+		] : null;
+
 		// Sort data based on sort parameters
 		if (isset($sort['accessor']) && isset($sort['by'])) {
-			$accessor = $sort['accessor'];
 			$order = $sort['by'];
 
 			usort($data, function($a, $b) use ($accessor, $order) {
 				$value_a = null;
 				$value_b = null;
+				$nulls_last = false;
 
 				// Get values based on accessor
 				if ($accessor === 'score') {
@@ -1115,6 +1173,28 @@ class Meow_MWSEO_Rest
 				} else if ($accessor === 'title') {
 					$value_a = strtolower($a['title']);
 					$value_b = strtolower($b['title']);
+				} else if (in_array($accessor, ['impressions', 'clicks', 'position'], true)) {
+					$nulls_last = true;
+					$value_a = isset($a['gsc'][$accessor]) ? (float) $a['gsc'][$accessor] : null;
+					$value_b = isset($b['gsc'][$accessor]) ? (float) $b['gsc'][$accessor] : null;
+					// A zero position means "no ranking data", not "rank zero".
+					if ($accessor === 'position') {
+						if ($value_a !== null && $value_a <= 0) $value_a = null;
+						if ($value_b !== null && $value_b <= 0) $value_b = null;
+					}
+				} else if ($accessor === 'visitors') {
+					$value_a = isset($a['visitors_30d']) ? (int) $a['visitors_30d'] : 0;
+					$value_b = isset($b['visitors_30d']) ? (int) $b['visitors_30d'] : 0;
+				} else if ($accessor === 'aibots') {
+					$value_a = isset($a['ai_bots_total']) ? (int) $a['ai_bots_total'] : 0;
+					$value_b = isset($b['ai_bots_total']) ? (int) $b['ai_bots_total'] : 0;
+				}
+
+				// Posts without data always go to the end, whatever the direction.
+				if ($nulls_last) {
+					if ($value_a === null && $value_b === null) return 0;
+					if ($value_a === null) return 1;
+					if ($value_b === null) return -1;
 				}
 
 				// Compare values
@@ -1129,6 +1209,10 @@ class Meow_MWSEO_Rest
 				}
 			});
 		}
+
+		// The real result count after every filter (status, search, opportunity views), so the
+		// pagination reflects what the user is actually looking at, not the whole library.
+		$total_counts['results'] = count( $data );
 
 		$paginated_data = array_slice($data, $offset, $limit);
 
@@ -1758,72 +1842,6 @@ class Meow_MWSEO_Rest
 
 	#endregion
 
-	#region Google Ranking
-	function rest_fetch_searches(  ) {
-		if ( is_null( $this->rank ) ) {
-			throw new Exception( 'Google Ranking is not available.' );
-		}
-
-		$searches = $this->rank->get_updated_searches();
-		return new WP_REST_Response([
-			'success' => true,
-			'message' => 'OK',
-			'data' => $searches,
-		], 200 );
-	}
-
-	function rest_delete_search( $request ) {
-		try {
-			if ( is_null( $this->rank ) ) {
-				throw new Exception( 'Google Ranking is not available.' );
-			}
-		$params = $request->get_json_params();
-		$searches = $this->rank->delete_search( $params['id'] );
-		
-
-		return new WP_REST_Response([
-			'success' => true,
-			'message' => 'OK',
-			'data' => $searches,
-		], 200 );
-
-		}
-		catch( Exception $e)
-		{
-			return new WP_REST_Response([
-				'success' => false,
-				'message' => $e->getMessage(),
-			], 500 );
-		}
-	}
-
-	function rest_save_search( $request ) {
-		try {
-			if ( is_null( $this->rank ) ) {
-				throw new Exception( 'Google Ranking is not available.' );
-			}
-		$params = $request->get_json_params();
-		
-		$search = $this->rank->add_search( $params );
-		
-		return new WP_REST_Response([
-			'success' => true,
-			'message' => 'OK - Save New Search',
-			'data' => $search,
-		], 200 );
-
-		}
-		catch( Exception $e)
-		{
-			return new WP_REST_Response([
-				'success' => false,
-				'message' => $e->getMessage(),
-			], 500 );
-		}
-	}
-
-	#endregion
-
 	#region WooCommerce
 
 	function rest_generate_fields( $request ) {
@@ -1848,6 +1866,78 @@ class Meow_MWSEO_Rest
 	}
 
 	#endregion
+
+	// Builds a short, post-specific action plan for a content-level issue (originality,
+	// completeness, readability...). The diagnosis already exists (stored analysis feedback,
+	// passed in by the client); this turns it into concrete next steps for THIS post.
+	function rest_ai_improvement_plan( $request ) {
+		try {
+			$params = $request->get_json_params();
+			$post_id = isset( $params['id'] ) ? (int) $params['id'] : 0;
+			$test = isset( $params['test'] ) ? sanitize_key( $params['test'] ) : '';
+			$issue_title = isset( $params['title'] ) ? sanitize_text_field( $params['title'] ) : '';
+			$diagnosis = isset( $params['description'] ) ? wp_strip_all_tags( (string) $params['description'] ) : '';
+
+			$post = $post_id ? get_post( $post_id ) : null;
+			if ( !$post || empty( $test ) ) {
+				return new WP_REST_Response([ 'success' => false, 'message' => 'Post not found.' ], 404 );
+			}
+
+			// Plans are cached per test: the diagnosis only changes when the post is re-analyzed,
+			// and re-analysis clears the cache via the timestamp check below.
+			$cache = get_post_meta( $post_id, '_mwseo_improve_plans', true );
+			$cache = is_array( $cache ) ? $cache : [];
+			if ( !empty( $cache[ $test ]['actions'] ) && !empty( $cache[ $test ]['time'] )
+				&& ( time() - (int) $cache[ $test ]['time'] ) < 7 * DAY_IN_SECONDS ) {
+				return new WP_REST_Response([
+					'success' => true,
+					'data' => [ 'actions' => $cache[ $test ]['actions'], 'cached' => true ],
+				], 200 );
+			}
+
+			global $mwai;
+			if ( is_null( $mwai ) || !isset( $mwai ) ) {
+				return new WP_REST_Response([ 'success' => false, 'message' => 'Missing AI Engine.' ], 500 );
+			}
+
+			$content = wp_strip_all_tags( strip_shortcodes( (string) $post->post_content ) );
+			$content = mb_substr( $content, 0, 4000 );
+
+			$prompt = "You are an SEO content coach helping improve one specific post.\n"
+				. "Post title: " . $post->post_title . "\n"
+				. "Issue: " . $issue_title . "\n"
+				. ( $diagnosis ? "Diagnosis from the analysis: " . $diagnosis . "\n" : '' )
+				. "Beginning of the post content (plain text):\n" . $content . "\n\n"
+				. "Give 3 to 5 concrete, specific actions the author should take in the editor to fix this issue for this exact post. "
+				. "Reference actual sections or phrases from the post where possible. Write in the same language as the post content. "
+				. "Each action must be one short sentence. "
+				. "Reply with a JSON object: {\"actions\": [\"...\", \"...\"]}.";
+
+			$result = $mwai->simpleJsonQuery( $prompt );
+			$actions = [];
+			if ( is_array( $result ) && !empty( $result['actions'] ) && is_array( $result['actions'] ) ) {
+				foreach ( array_slice( $result['actions'], 0, 6 ) as $action ) {
+					if ( is_string( $action ) && trim( $action ) !== '' ) {
+						$actions[] = sanitize_text_field( $action );
+					}
+				}
+			}
+			if ( empty( $actions ) ) {
+				return new WP_REST_Response([ 'success' => false, 'message' => 'The plan could not be generated.' ], 400 );
+			}
+
+			$cache[ $test ] = [ 'actions' => $actions, 'time' => time() ];
+			update_post_meta( $post_id, '_mwseo_improve_plans', $cache );
+
+			return new WP_REST_Response([
+				'success' => true,
+				'data' => [ 'actions' => $actions, 'cached' => false ],
+			], 200 );
+		}
+		catch ( Exception $e ) {
+			return new WP_REST_Response([ 'success' => false, 'message' => $e->getMessage() ], 500 );
+		}
+	}
 
 	function rest_ai_suggest( $request ) {
 		try {
@@ -2253,72 +2343,6 @@ class Meow_MWSEO_Rest
 			'generated_at' => $generated_at,
 			'generated_at_ts' => $ts
 		] );
-	}
-
-	function rest_ai_web_scraping( $request ) {
-
-		try {
-			if ( is_null( $this->rank ) ) {
-				throw new Exception( 'Google Ranking is not available.' );
-			}
-
-			$params = $request->get_json_params();
-			$value = $params[ 'search' ];
-
-			// prepare the search parameters with default values
-			$locale = get_locale();
-			$search = [
-				'q__search' => $value,
-				'cr__country' => substr($locale, 3, 2),
-				'hl__interface_language' => substr($locale, 0, 2),
-				'gl__geolocation' => 'country' . substr($locale, 3, 2),
-				'exactTerms__exact_terms'=> '',
-				'excludeTerms__exclude_terms'=> '',
-				'filter__filter' => '0',
-
-				'd__depth' => 1,
-			];
-			$google = new MeowPro_MWSEO_Ranks_Google( $this->core );
-			$result = $google->search( $search );
-
-			if ( !$result ) {
-				return new WP_REST_Response([
-					'success' => false,
-					'message' => 'AI suggestion is invalid.',
-				], 400 );
-			}
-
-			global $mwai;
-			if( is_null( $mwai ) || !isset( $mwai ) ) {
-				return new WP_REST_Response([
-					'success' => false,
-					'message' => 'Missing AI Engine.',
-				], 500 );
-			}
-
-			$string_result = json_encode( $result );
-
-			$prompt = "This are the top result for the search: " . $value . ". From them generate a title, an excerpt and a slug. Reverse engineer these result so the generated content is SEO optimized for this search. \n\n" . $string_result . "\n\n Use the following keys: title, excerpt, slug.";
-			$suggestion = $mwai->simpleJsonQuery( $prompt );
-	
-			return new WP_REST_Response([
-				'success' => true,
-				'message' => 'OK',
-				'data' => [
-					'title' => $suggestion[ 'title' ], 
-					'excerpt' => $suggestion[ 'excerpt' ],
-					'slug' => $suggestion[ 'slug' ],
-				]
-			], 200 );
-	
-		}
-		catch( Exception $e)
-		{
-			return new WP_REST_Response([
-				'success' => false,
-				'message' => $e->getMessage(),
-			], 500 );
-		}
 	}
 
 	function rest_import_data( $request ) {
@@ -3397,6 +3421,27 @@ class Meow_MWSEO_Rest
 				? $this->core->pro->search_console->get_tracked_properties() : [],
 			'message' => 'Active Search Console property updated.'
 		], 200 );
+	}
+
+	function rest_get_gsc_movers( $request ) {
+		$params = $request->get_json_params();
+		$args = [
+			'days' => isset( $params['days'] ) ? (int) $params['days'] : 28,
+			'limit' => isset( $params['limit'] ) ? (int) $params['limit'] : 4,
+			'property' => isset( $params['property'] ) ? sanitize_text_field( $params['property'] ) : null,
+			'fresh' => !empty( $params['fresh'] ),
+		];
+		return new WP_REST_Response( [ 'success' => true, 'data' => $this->core->get_gsc_page_movers( $args ) ], 200 );
+	}
+
+	function rest_get_gsc_timeseries( $request ) {
+		$params = $request->get_json_params();
+		$args = [
+			'days' => isset( $params['days'] ) ? (int) $params['days'] : 28,
+			'property' => isset( $params['property'] ) ? sanitize_text_field( $params['property'] ) : null,
+			'fresh' => !empty( $params['fresh'] ),
+		];
+		return new WP_REST_Response( [ 'success' => true, 'data' => $this->core->get_gsc_timeseries( $args ) ], 200 );
 	}
 
 	function rest_get_gsc_summary( $request ) {
