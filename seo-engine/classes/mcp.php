@@ -1146,7 +1146,29 @@ class Meow_MWSEO_MCP {
     if ( strpos( $tool, 'mwseo_' ) !== 0 ) {
       return $result;
     }
-    
+
+    // Accept common aliases for the post id. These tools use "post_id", while
+    // AI Engine's wp_* post tools use the WordPress-native "ID". Agents hopping
+    // between suites guess the wrong spelling; mirror the variants so either
+    // works. post_id is the only post identifier here, so this is safe.
+    if ( is_array( $args ) ) {
+      $idAliases = [ 'post_id', 'ID', 'id' ];
+      $primaryId = null;
+      foreach ( $idAliases as $k ) {
+        if ( isset( $args[ $k ] ) && $args[ $k ] !== '' ) {
+          $primaryId = $args[ $k ];
+          break;
+        }
+      }
+      if ( $primaryId !== null ) {
+        foreach ( $idAliases as $k ) {
+          if ( !isset( $args[ $k ] ) || $args[ $k ] === '' ) {
+            $args[ $k ] = $primaryId;
+          }
+        }
+      }
+    }
+
     // Ensure API is initialized
     if ( !$this->api ) {
       return [ 'success' => false, 'error' => 'SEO Engine API not initialized' ];

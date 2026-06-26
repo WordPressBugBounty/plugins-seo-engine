@@ -187,13 +187,14 @@ class Meow_MWSEO_Admin extends MeowKit_MWSEO_Admin {
 		// native post lists, only when the Content SEO module is enabled, per enabled post type.
 		if ( $this->core->get_option( 'content_seo', false ) ) {
 			$post_types = (array) $this->core->get_option( 'select_post_types', ['post', 'page'] );
-			$label = __( 'Content SEO', 'seo-engine' );
 
 			if ( in_array( 'post', $post_types, true ) ) {
+				$label = __( 'All Posts (SEO)', 'seo-engine' );
 				add_submenu_page( 'edit.php', $label, $label, 'manage_options',
 					'mwseo_surgical_post', array( $this, 'render_surgical_posts' ) );
 			}
 			if ( in_array( 'page', $post_types, true ) ) {
+				$label = __( 'All Pages (SEO)', 'seo-engine' );
 				add_submenu_page( 'edit.php?post_type=page', $label, $label, 'manage_options',
 					'mwseo_surgical_page', array( $this, 'render_surgical_page' ) );
 			}

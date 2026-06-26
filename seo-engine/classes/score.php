@@ -160,8 +160,6 @@ class Meow_MWSEO_Score {
 	 * Analyze post content and extract signals
 	 */
 	private function analyze_post( $post ) {
-		$check_live_content = $this->get_option( 'check_live_content', false );
-
 		$seo_title = get_post_meta( $post->ID, '_mwseo_title', true );
 		$title = !empty( $seo_title ) ? $seo_title : $post->post_title;
 		$excerpt = get_post_meta( $post->ID, '_mwseo_excerpt', true ) ?: $post->post_excerpt;
@@ -178,8 +176,8 @@ class Meow_MWSEO_Score {
 			'title' => $post->post_title,
 			'slug' => $post->post_name,
 			'excerpt' => $excerpt,
-			'content' => $check_live_content ? $this->core->get_live_content( $post ) : wp_strip_all_tags( $post->post_content ),
-			'content_html' => $check_live_content ? $this->core->get_live_content( $post, false ) : $post->post_content,
+			'content' => apply_filters( 'mwseo_post_content', wp_strip_all_tags( $post->post_content ), $post, true ),
+			'content_html' => apply_filters( 'mwseo_post_content', $post->post_content, $post, false ),
 			'word_count' => 0,
 			'title_length' => mb_strlen( $full_page_title ),
 			'excerpt_length' => mb_strlen( $excerpt ),

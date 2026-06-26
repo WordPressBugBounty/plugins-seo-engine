@@ -4,7 +4,7 @@ Tags: seo, redirection, sitemap, schema, analytics
 Donate link: https://www.patreon.com/meowapps
 Requires at least: 6.0
 Tested up to: 7.0
-Stable tag: 0.8.0
+Stable tag: 0.8.1
 Requires PHP: 7.4
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
@@ -268,6 +268,14 @@ No. The Redirections & 404 module handles URL redirects (301, 302, 307, 308, 410
 Yes, and it is fully automatic. When you publish or update a post, SEO Engine instantly notifies Bing, Yandex, Naver and every IndexNow-compatible engine, so your content gets crawled right away instead of waiting. The verification key is generated and served for you; there is nothing to configure. Note that Google does not use IndexNow and keeps reading your sitemap instead.
 
 == Changelog ==
+
+= 0.8.1 (2026/06/26) =
+* Add: Quick Edit button on posts and new NekoMoreMenu for card actions.
+* Update: Embedded Content SEO screens renamed to "All Posts (SEO)" and "All Pages (SEO)", with their header removed.
+* Add: Parsers for third-party themes and builders (e.g., Divi) as a fallback when Live Content is unavailable.
+* Update: Live Content user agent and SSL settings for broader compatibility.
+* Fix: Check for empty parsers option.
+* Update: MCP tools now accept ID, post_id, or id interchangeably for the post identifier, matching AI Engine's wp_* tools.
 
 = 0.8.0 (2026/06/14) =
 * Fix: Dashboard Search Visibility and Movers now query the active Search Console property, so multi-property sites no longer show empty stats.

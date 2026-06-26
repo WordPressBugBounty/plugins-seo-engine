@@ -23,6 +23,7 @@ class Meow_MWSEO_Core
 	private $insights_module = null;
 	private $analytics_module = null;
 	private $googleanalytics_module = null;
+	private $parsers = null;
 	public $redirects_module = null;
 
 	public function __construct() {
@@ -93,6 +94,14 @@ class Meow_MWSEO_Core
 
 		add_action( 'init', [ $this, 'reject_gptbot_user_agent' ], 99, 0 );
 
+		// Live content: when enabled, the analyzed content is the actual rendered page
+		// (handles all page builders) instead of the raw post_content.
+		if ( $this->get_live_content_mode() !== 'disabled' ) {
+			add_filter( 'mwseo_post_content', [ $this, 'filter_live_content' ], 10, 3 );
+		} else {
+			// If not using Live Content, rely on parsers instead
+			$this->parsers = new Meow_MWSEO_Helpers_Parsers( $this );
+		}
 
 		// Woocommerce
 		if ( $this->get_option( 'woocommerce_assistant', false ) ) {
@@ -143,6 +152,8 @@ class Meow_MWSEO_Core
 		if ( class_exists( 'Meow_MWAI_Core' ) || isset( $GLOBALS['mwai'] ) ) {
 			new Meow_MWSEO_MCP( $this );
 		}
+
+		
 	}
 
 	function get_logs() {
@@ -791,6 +802,23 @@ class Meow_MWSEO_Core
 		return $images;
 	}
 
+	// Normalizes the live content mode option, accounting for legacy boolean values
+	// ('disabled' = off, 'main' = extract main content, 'whole' = use the whole page).
+	function get_live_content_mode() {
+		$mode = $this->get_option( 'check_live_content', 'disabled' );
+		if ( $mode === true || $mode === 1 || $mode === '1' ) {
+			return 'main';
+		}
+		if ( in_array( $mode, [ 'main', 'whole' ], true ) ) {
+			return $mode;
+		}
+		return 'disabled';
+	}
+
+	function filter_live_content( $content, $post, $strip_html = true ) {
+		return $this->get_live_content( $post, $strip_html );
+	}
+
 	function get_live_content( $post, $strip_html = true ) {
 		// Fetch the actual rendered page (handles all page builders)
 		$post_url = get_permalink( $post->ID );
@@ -801,7 +829,8 @@ class Meow_MWSEO_Core
 
 		$response = wp_remote_get( $post_url, [
 			'timeout' => 15,
-			'user-agent' => 'SEO Engine Content Analyzer'
+			'user-agent' => 'Mozilla/5.0 (compatible; SEO Engine Content Analyzer; +' . home_url() . ')',
+			'sslverify' => false, // Allow self-signed certs on local/staging
 		] );
 
 		if ( is_wp_error( $response ) ) {
@@ -821,8 +850,8 @@ class Meow_MWSEO_Core
 			return $strip_html ? wp_strip_all_tags( $post->post_content ) : $post->post_content;
 		}
 
-		// Extract main content area
-		$content = $this->extract_main_content( $html );
+		// Extract main content area, unless the whole page should be analyzed.
+		$content = $this->get_live_content_mode() === 'whole' ? $html : $this->extract_main_content( $html );
 		$content_length = strlen( wp_strip_all_tags( $content ) );
 
 		if ( $content_length < 50 ) {
@@ -875,8 +904,7 @@ class Meow_MWSEO_Core
 
 	function check_images_alt_text( $post ) {
 
-		$check_live_content = $this->get_option( 'check_live_content', false );
-		$content = $check_live_content ? $this->get_live_content( $post, false ) : $post->post_content;
+		$content = apply_filters( 'mwseo_post_content', $post->post_content, $post, false );
 
 		$images = $this->get_images_from_content( $content );
 		if ( !is_array( $images ) ) {
@@ -1258,7 +1286,7 @@ class Meow_MWSEO_Core
 			'slug_words_max' => 6,
 			'smart_internal_links' => true,
 			'check_external_links' => false,
-			'check_live_content' => false,
+			'check_live_content' => 'disabled',
 			'schema_by_post_type' => [
 				'post' => 'Article',
 				'page' => 'WebPage',
@@ -1361,6 +1389,11 @@ class Meow_MWSEO_Core
 		
 		// Make sure every option is set
 		$options = wp_parse_args( $options, $this->list_options() );
+
+		if( $this->parsers ) {
+			$options = $this->parsers->refresh_parsers( $options );
+		}
+		
 		return $options;
 	}
 
@@ -1387,6 +1420,8 @@ class Meow_MWSEO_Core
 	function reset_options() {
 		return $this->update_options( $this->list_options() );
 	}
+
+	
 
 	#endregion
 

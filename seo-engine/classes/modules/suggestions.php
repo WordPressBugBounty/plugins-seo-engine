@@ -198,17 +198,10 @@ class Meow_MWSEO_Modules_Suggestions
 			global $mwseo_core;
 			$core = $mwseo_core;
 		}
-		$check_live_content = $core->get_option( 'check_live_content', false );
-		
-		$content = '';
-		
-		// If check_live_content is enabled, try to fetch the live content
-		if ( $check_live_content ) {
-			$content = $core->get_live_content( $post );
-		} else {
-			$content = strip_tags( $post->post_content );
-		}
-		
+
+		// Live content (when enabled) is applied via the mwseo_post_content filter.
+		$content = apply_filters( 'mwseo_post_content', strip_tags( $post->post_content ), $post, true );
+
 		$words = str_word_count( $content, 1 );
 		$words_count = count( $words );
 
