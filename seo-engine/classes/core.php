@@ -25,6 +25,7 @@ class Meow_MWSEO_Core
 	private $googleanalytics_module = null;
 	private $parsers = null;
 	public $redirects_module = null;
+	public $indexnow_module = null;
 
 	public function __construct() {
 		global $mwseo_core;
@@ -82,12 +83,16 @@ class Meow_MWSEO_Core
 		$use_technical_seo = $this->get_option( 'technical_seo', false );
 		$use_seo_metadata = $this->get_option( 'use_seo_metadata', true );
 		$auto_page_title = $this->get_option( 'auto_page_title', true );
-		if ( ( $use_content_seo || $use_technical_seo ) && $auto_page_title ) {
+		// When another SEO plugin (Yoast, Rank Math, AIOSEO, SEOPress) is handling the
+		// frontend meta tags, SEO Engine steps back so the two don't emit duplicates.
+		// It keeps doing everything else (analysis, scoring, AI, MCP) regardless.
+		$render_frontend_meta = $this->should_render_frontend_meta();
+		if ( ( $use_content_seo || $use_technical_seo ) && $auto_page_title && $render_frontend_meta ) {
 			add_filter( 'pre_get_document_title', [ $this, 'render_title' ], 99, 1 );
 			// Remove WordPress archive prefixes ("Archives: ", "Category: ", etc.) for cleaner SEO titles
 			add_filter( 'get_the_archive_title_prefix', '__return_empty_string' );
 		}
-		if ( $use_content_seo && $use_seo_metadata ) {
+		if ( $use_content_seo && $use_seo_metadata && $render_frontend_meta ) {
 			add_action( 'wp_head', [ $this, 'render_description' ], 99, 0 );
 			add_action( 'wp_head', [ $this, 'render_canonical' ], 99, 0 );
 		}
@@ -242,7 +247,12 @@ class Meow_MWSEO_Core
 				}
 			}
 		}
-		
+
+		// Make sure the log file exists before opening it to avoid warnings
+		if ( !file_exists( $log_file_path ) ) {
+			@touch( $log_file_path );
+		}
+
 		$fh = @fopen( $log_file_path, 'a' );
 		if ( !$fh ) { return false; }
 		$date = date( "Y-m-d H:i:s" );
@@ -690,6 +700,29 @@ class Meow_MWSEO_Core
 		}
 		$title = html_entity_decode( $title );
 		return $title;
+	}
+
+	// Kept in sync with the detection surfaced to the admin UI in admin.php.
+	function is_other_seo_plugin_active() {
+		return class_exists( 'WPSEO_Frontend' )       // Yoast SEO
+			|| class_exists( 'All_in_One_SEO_Pack' )  // All in One SEO
+			|| class_exists( 'RankMath' )             // Rank Math
+			|| class_exists( 'SEOPress' );            // SEOPress
+	}
+
+	// Whether SEO Engine should output its own frontend meta tags (title, description,
+	// canonical, Open Graph). In 'auto' it steps back when another SEO plugin is active
+	// so the two don't emit duplicate tags; 'always' and 'never' force the behavior.
+	// The analysis, scoring, AI and MCP features run regardless of this setting.
+	function should_render_frontend_meta() {
+		$mode = $this->get_option( 'frontend_meta_mode', 'auto' );
+		if ( $mode === 'always' ) {
+			return true;
+		}
+		if ( $mode === 'never' ) {
+			return false;
+		}
+		return !$this->is_other_seo_plugin_active();
 	}
 
 	function render_title( $title ) {
@@ -1243,6 +1276,9 @@ class Meow_MWSEO_Core
 			'pillar_weight_tech' => 50, // Technical weight (0-100)
 			'quality_safeguards_enabled' => true,
 			'use_seo_metadata' => true,
+			// Frontend meta output: 'auto' defers to another active SEO plugin (Yoast,
+			// Rank Math, AIOSEO, SEOPress), 'always' outputs regardless, 'never' stays silent.
+			'frontend_meta_mode' => 'auto',
 			'show_ai_summary' => true,
 			'row_density' => 'cozy', // compact | cozy
 
@@ -1493,14 +1529,26 @@ class Meow_MWSEO_Core
 		}
 
 		$prompt  = apply_filters( 'mwseo_woo_product_prompt', $prompt );
-		$prompt .= "Use this keys: description, short_description, seo_title, tags.";
+		$prompt .= "Your reply must be a formatted JSON only. Use these keys: description, short_description, seo_title, tags.";
 
 		$prompt = str_replace( '{PRODUCT}',  $params['product'],  $prompt );
 		$prompt = str_replace( '{LANGUAGE}', $params['language'], $prompt );
 
-		$response = $mwai->simpleJsonQuery( $prompt );;
+		$response = $mwai->simpleTextQuery( $prompt );
+
+		// Remove any "```json" or "```" from the response
+		$response = preg_replace( '/^```json\s*/', '', $response );
+		$response = preg_replace( '/\s*```$/', '', $response );
+
+		// Ensure the response is valid JSON
+		$json = json_decode( $response, true );
+		if ( json_last_error() !== JSON_ERROR_NONE ) {
+			$this->log( '⚠️ WooCommerce Assistant: Invalid JSON response from AI: ' . json_last_error_msg() );
+			$this->log( 'Response: ' .$response );
+			return false;
+		}
 		
-		return $response;
+		return $json;
 	}
 
 	#endregion
@@ -1545,7 +1593,10 @@ class Meow_MWSEO_Core
 			}
 		}
 
-		return count( $posts );
+		return array(
+			'posts' => count( $posts ),
+			'redirects' => 0,
+		);
 	}
 
 	function get_seo_title( $post ) {
@@ -1675,7 +1726,16 @@ class Meow_MWSEO_Core
 			}
 		}
 
-		return count( $posts );
+		// Also import Rank Math redirections that aren't already declared in SEO Engine.
+		$redirects = 0;
+		if ( $this->redirects_module ) {
+			$redirects = (int) $this->redirects_module->import_from_rank_math();
+		}
+
+		return array(
+			'posts' => count( $posts ),
+			'redirects' => $redirects,
+		);
 	}
 
 	function add_wc_meta_boxes()

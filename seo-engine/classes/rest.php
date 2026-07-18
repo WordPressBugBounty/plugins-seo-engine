@@ -2352,10 +2352,10 @@ class Meow_MWSEO_Rest
 
 			switch ( $plugin ) {
 				case 'rankmath':
-					$import = $this->core->import_rank_math();
+					$status = $this->core->import_rank_math();
 					break;
 				case 'yoast':
-					$import = $this->core->import_yoast();
+					$status = $this->core->import_yoast();
 					break;
 				default:
 					return new WP_REST_Response([
@@ -2364,19 +2364,29 @@ class Meow_MWSEO_Rest
 					], 200 );
 			}
 
-			if ( $import ) {
-				return new WP_REST_Response([
-					'success' => true,
-					'message' => "$import post(s) SEO data imported.",
-					'data' => $import,
-				], 200 );
+			$posts = isset( $status['posts'] ) ? (int) $status['posts'] : 0;
+			$redirects = isset( $status['redirects'] ) ? (int) $status['redirects'] : 0;
+
+			// Build a separate message for posts and redirections.
+			$messages = [];
+			if ( $posts > 0 ) {
+				$messages[] = "$posts post(s) SEO data imported.";
 			}
-			else {
-				return new WP_REST_Response([
-					'success' => true,
-					'message' => 'No posts found to import.',
-				], 200 );
+			if ( $redirects > 0 ) {
+				$messages[] = "$redirects redirection(s) imported.";
 			}
+			if ( empty( $messages ) ) {
+				$messages[] = 'No posts or redirections found to import.';
+			}
+
+			return new WP_REST_Response([
+				'success' => true,
+				'message' => implode( ' ', $messages ),
+				'data' => [
+					'posts' => $posts,
+					'redirects' => $redirects,
+				],
+			], 200 );
 
 		}
 		catch( Exception $e)

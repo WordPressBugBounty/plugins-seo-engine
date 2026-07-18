@@ -63,6 +63,8 @@ class Meow_MWSEO_Admin extends MeowKit_MWSEO_Admin {
 
 	function seo_engine_headers() {
 		if( !$this->core->get_option( 'social_networks', false ) ) { return; }
+		// Step back when another SEO plugin is handling the frontend meta tags.
+		if( !$this->core->should_render_frontend_meta() ) { return; }
 
 		// use open graph tags for social networks, we should use the featured image, title and excerpt
 		if ( is_single() || is_page() ) {
@@ -151,7 +153,7 @@ class Meow_MWSEO_Admin extends MeowKit_MWSEO_Admin {
 		wp_enqueue_script('seo_engine_seo' );
 
 		// Localize and options
-		wp_localize_script( 'seo_engine_seo', 'mwseo', [
+		$js = [
 			'api_url' => rest_url( 'seo-engine/v1' ),
 			'rest_url' => rest_url(),
 			'plugin_url' => MWSEO_URL,
@@ -169,10 +171,12 @@ class Meow_MWSEO_Admin extends MeowKit_MWSEO_Admin {
 			'active_seo_plugins' => [
 				'yoast'      => class_exists( 'WPSEO_Frontend' ),
 				'all_in_one' => class_exists( 'All_in_One_SEO_Pack' ),
-				'rank_math'  => class_exists( 'RankMath\Frontend' ),
+				'rank_math'  => class_exists( 'RankMath' ),
 				'seopress'   => class_exists( 'SEOPress' ),
 			]
-		] );
+		];
+
+		wp_localize_script( 'seo_engine_seo', 'mwseo', $js );
 	}
 
 	function is_registered() {

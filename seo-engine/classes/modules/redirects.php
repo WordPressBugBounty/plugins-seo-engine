@@ -586,6 +586,89 @@ class Meow_MWSEO_Modules_Redirects
 		return $this->get_redirect( $id );
 	}
 
+	public function import_from_rank_math() {
+		global $wpdb;
+
+		$rm_table = $wpdb->prefix . 'rank_math_redirections';
+		$table_exists = $wpdb->get_var( $wpdb->prepare( 'SHOW TABLES LIKE %s', $rm_table ) ) === $rm_table;
+		if ( !$table_exists ) {
+			return 0;
+		}
+
+		// Make sure our own table exists before inserting (the module may be disabled).
+		$this->maybe_create_redirects_table();
+
+		$rows = $wpdb->get_results( "SELECT sources, url_to, header_code, status FROM $rm_table", ARRAY_A );
+		if ( empty( $rows ) ) {
+			return 0;
+		}
+
+		$imported = 0;
+		foreach ( $rows as $row ) {
+			$sources = maybe_unserialize( $row['sources'] );
+			if ( !is_array( $sources ) ) {
+				continue;
+			}
+
+			$target = isset( $row['url_to'] ) ? trim( $row['url_to'] ) : '';
+			$status_code = isset( $row['header_code'] ) ? intval( $row['header_code'] ) : 301;
+			$enabled = ( isset( $row['status'] ) && $row['status'] === 'active' ) ? 1 : 0;
+
+			foreach ( $sources as $source ) {
+				if ( empty( $source['pattern'] ) ) {
+					continue;
+				}
+
+				$pattern = $source['pattern'];
+				$comparison = isset( $source['comparison'] ) ? $source['comparison'] : 'exact';
+
+				// Map Rank Math comparison types to SEO Engine's match_type (exact|regex).
+				$match_type = 'exact';
+				switch ( $comparison ) {
+					case 'regex':
+						$match_type = 'regex';
+						break;
+					case 'contains':
+						$match_type = 'regex';
+						$pattern = '.*' . preg_quote( $pattern, '#' ) . '.*';
+						break;
+					case 'start':
+						$match_type = 'regex';
+						$pattern = '^' . preg_quote( $pattern, '#' );
+						break;
+					case 'end':
+						$match_type = 'regex';
+						$pattern = preg_quote( $pattern, '#' ) . '$';
+						break;
+					case 'exact':
+					default:
+						$match_type = 'exact';
+						break;
+				}
+
+				$result = $this->save_redirect( array(
+					'source_url' => $pattern,
+					'target_url' => $target,
+					'match_type' => $match_type,
+					'status_code' => $status_code,
+					'enabled' => $enabled,
+					'notes' => 'Imported from Rank Math',
+				), true );
+
+				// Count only rows we actually inserted (skip existing/errors like Pro-gated regex).
+				if ( is_array( $result ) && empty( $result['skipped'] ) ) {
+					$imported++;
+				}
+			}
+		}
+
+		if ( $imported > 0 ) {
+			$this->core->log( "↪️ Imported {$imported} redirect(s) from Rank Math." );
+		}
+
+		return $imported;
+	}
+
 	private function normalize_source_for_storage( $source ) {
 		// If a full URL was provided for the current site, strip down to the path
 		$site_host = wp_parse_url( home_url(), PHP_URL_HOST );

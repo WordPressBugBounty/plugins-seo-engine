@@ -1445,27 +1445,62 @@ class Meow_MWSEO_Score {
 		// (Gutenberg / shortcodes / theme wrappers all get unwrapped).
 		$rendered_plain = trim( preg_replace( '/\s+/u', ' ', wp_strip_all_tags( $html ) ) );
 
-		// Sample 3 non-overlapping chunks from the post body and check each is present.
-		// A SPA site will have an empty <body> and none of these will appear.
-		$sample_len = 40;
-		$total = mb_strlen( $plain, 'UTF-8' );
-		$samples = [
-			mb_substr( $plain, 0, $sample_len, 'UTF-8' ),
-			mb_substr( $plain, max( 0, intval( $total / 2 ) - intval( $sample_len / 2 ) ), $sample_len, 'UTF-8' ),
-			mb_substr( $plain, max( 0, $total - $sample_len ), $sample_len, 'UTF-8' ),
-		];
+		// Measure how much of the post's text actually appears in the rendered page.
+		// We do NOT compare exact character windows: the_content applies wptexturize
+		// (straight quotes -> curly, -- -> –), decodes/encodes entities, and joins blocks
+		// tag-adjacently (no space), so verbatim windows spuriously mismatch on
+		// content-dense server-rendered pages. Comparing normalized *words* instead is
+		// immune to all of that while still catching a genuinely empty SPA <body>.
+		$post_norm     = mb_strtolower( html_entity_decode( $plain, ENT_QUOTES | ENT_HTML5, 'UTF-8' ), 'UTF-8' );
+		$rendered_norm = mb_strtolower( html_entity_decode( $rendered_plain, ENT_QUOTES | ENT_HTML5, 'UTF-8' ), 'UTF-8' );
 
-		$hits = 0;
-		foreach ( $samples as $sample ) {
-			$sample = trim( $sample );
-			if ( $sample === '' ) continue;
-			if ( mb_stripos( $rendered_plain, $sample, 0, 'UTF-8' ) !== false ) {
-				$hits++;
+		preg_match_all( '/[\p{L}\p{N}]{2,}/u', $post_norm, $m_post );
+		$post_tokens = array_unique( $m_post[0] );
+
+		if ( count( $post_tokens ) >= 12 ) {
+			// Space-delimited languages: fraction of the post's distinct words present.
+			preg_match_all( '/[\p{L}\p{N}]{2,}/u', $rendered_norm, $m_rendered );
+			$rendered_tokens = array_flip( $m_rendered[0] );
+			$found = 0;
+			foreach ( $post_tokens as $token ) {
+				if ( isset( $rendered_tokens[ $token ] ) ) {
+					$found++;
+				}
 			}
+			$coverage = $found / count( $post_tokens );
+		}
+		else {
+			// Token-sparse text (e.g. CJK, which has no word boundaries): compare the set
+			// of adjacent-character pairs over the whitespace-stripped text instead.
+			$post_chars     = preg_split( '//u', preg_replace( '/\s+/u', '', $post_norm ), -1, PREG_SPLIT_NO_EMPTY );
+			$rendered_chars = preg_split( '//u', preg_replace( '/\s+/u', '', $rendered_norm ), -1, PREG_SPLIT_NO_EMPTY );
+			if ( count( $post_chars ) < 20 ) {
+				set_transient( $cache_key, 'na', DAY_IN_SECONDS );
+				return 'NA';
+			}
+			$make_bigrams = function( $chars ) {
+				$bigrams = [];
+				$n = count( $chars );
+				for ( $i = 0; $i < $n - 1; $i++ ) {
+					$bigrams[ $chars[ $i ] . $chars[ $i + 1 ] ] = true;
+				}
+				return $bigrams;
+			};
+			$post_bigrams     = $make_bigrams( $post_chars );
+			$rendered_bigrams = $make_bigrams( $rendered_chars );
+			$found = 0;
+			foreach ( array_keys( $post_bigrams ) as $bigram ) {
+				if ( isset( $rendered_bigrams[ $bigram ] ) ) {
+					$found++;
+				}
+			}
+			$coverage = $found / count( $post_bigrams );
 		}
 
-		// Require at least 2 of 3 samples present — handles minor whitespace/HTML differences.
-		$pass = ( $hits >= 2 );
+		// A server-rendered page scores ~0.9+; a JS-injected SPA body scores near 0.
+		// Require at least half the content present, which tolerates cache drift and
+		// minor edits while still flagging content that only appears after JS runs.
+		$pass = ( $coverage >= 0.5 );
 		set_transient( $cache_key, $pass ? 'pass' : 'fail', DAY_IN_SECONDS );
 		return $pass ? 100 : 0;
 	}
