@@ -1138,6 +1138,35 @@ class Meow_MWSEO_MCP {
       ]
     ];
 
+    // AI Visibility (Pro) — how brands/products are recommended by AI assistants.
+    $aiVisibility = $this->core->ai_visibility();
+    if ( $aiVisibility && $aiVisibility->is_enabled() ) {
+      $tools[] = [
+        'name' => 'mwseo_ai_visibility_brands',
+        'description' => 'List the brands or products tracked by AI Visibility, with their AI Visibility score (0-100), their rank on each AI provider (OpenAI, Anthropic, Google...), how many checks mentioned them, sentiment, and when they were last scanned. Use this to answer "how visible is my brand in AI assistants" or to find which tracked products are invisible to AI search.',
+        'category' => 'SEO Engine',
+        'accessLevel' => 'read',
+        'inputSchema' => [ 'type' => 'object' ]
+      ];
+
+      $tools[] = [
+        'name' => 'mwseo_ai_visibility_detail',
+        'description' => 'Get the full AI Visibility breakdown for one tracked brand: every question tested, whether each AI provider mentioned the brand and at what rank, the competitors recommended alongside it, and the trend over past scans. Use this to understand WHY a brand ranks well or poorly, and which questions it is missing from.',
+        'category' => 'SEO Engine',
+        'accessLevel' => 'read',
+        'inputSchema' => [
+          'type' => 'object',
+          'properties' => [
+            'brand_id' => [
+              'type' => 'integer',
+              'description' => 'The tracked brand ID, from mwseo_ai_visibility_brands.'
+            ]
+          ],
+          'required' => [ 'brand_id' ]
+        ]
+      ];
+    }
+
     return $tools;
   }
   
@@ -2347,6 +2376,62 @@ class Meow_MWSEO_MCP {
             return [ 'success' => false, 'error' => 'Not connected to Google Search Console, or no property set. Run mwseo_gsc_status first, or pass a property argument.' ];
           }
           return [ 'success' => true, 'data' => $gsc->get_top_pages( $args ) ];
+        }
+
+        // AI Visibility
+        case 'mwseo_ai_visibility_brands': {
+          $mod = $this->core->ai_visibility();
+          if ( !$mod || !$mod->is_enabled() ) {
+            return [ 'success' => false, 'error' => 'AI Visibility is not enabled.' ];
+          }
+          $brands = array();
+          foreach ( $mod->list_brands() as $b ) {
+            $m = isset( $b['metrics'] ) ? $b['metrics'] : array();
+            $providers = array();
+            foreach ( (array) ( isset( $b['by_provider'] ) ? $b['by_provider'] : array() ) as $p ) {
+              $providers[ $p['provider'] ] = $p['mentions'] > 0
+                ? ( $p['rank'] !== null ? 'rank #' . $p['rank'] : 'mentioned' )
+                : 'not mentioned';
+            }
+            $brands[] = array(
+              'brand_id'     => $b['id'],
+              'name'         => $b['name'],
+              'url'          => $b['url'],
+              'score'        => $b['score'],
+              'providers'    => $providers,
+              'mentions'     => isset( $m['mentions'] ) ? $m['mentions'] : 0,
+              'checks'       => isset( $m['total'] ) ? $m['total'] : 0,
+              'sentiment'    => isset( $m['sentiment'] ) ? $m['sentiment'] : null,
+              'last_scan_at' => $b['last_scan_at'],
+            );
+          }
+          return [ 'success' => true, 'data' => array(
+            'brands' => $brands,
+            'note'   => 'Scores measure what AI models answer from memory (no live web browsing). 0 means the brand was never mentioned.',
+          ) ];
+        }
+
+        case 'mwseo_ai_visibility_detail': {
+          $mod = $this->core->ai_visibility();
+          if ( !$mod || !$mod->is_enabled() ) {
+            return [ 'success' => false, 'error' => 'AI Visibility is not enabled.' ];
+          }
+          $brand_id = isset( $args['brand_id'] ) ? intval( $args['brand_id'] ) : 0;
+          $brand = $mod->get_brand( $brand_id );
+          if ( !$brand ) {
+            return [ 'success' => false, 'error' => 'Brand not found.' ];
+          }
+          return [ 'success' => true, 'data' => array(
+            'brand'       => array(
+              'brand_id' => $brand['id'],
+              'name'     => $brand['name'],
+              'url'      => $brand['url'],
+              'score'    => $brand['score'],
+            ),
+            'queries'     => $mod->get_brand_queries( $brand_id ),
+            'competitors' => $mod->get_brand_competitors( $brand_id ),
+            'timeseries'  => $mod->get_brand_timeseries( $brand_id ),
+          ) ];
         }
 
         // Post Management

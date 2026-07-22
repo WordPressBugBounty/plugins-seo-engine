@@ -4,7 +4,7 @@ Tags: seo, redirection, sitemap, schema, analytics
 Donate link: https://www.patreon.com/meowapps
 Requires at least: 6.0
 Tested up to: 7.0
-Stable tag: 0.8.2
+Stable tag: 0.8.4
 Requires PHP: 7.4
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
@@ -29,6 +29,9 @@ All the SEO basics, straight to the point. No endless settings for features you 
 
 🪄 **Magic Fix**
 Detected issues come with a quiet "fix" affordance — AI generates a concrete suggestion, you review it, you apply it. Internal links, ALT text, grammar, titles, excerpts, featured images. No bulk "fix everything" that rewrites your site behind your back.
+
+📡 **AI Visibility**
+See how your brand or product shows up when people ask ChatGPT, Gemini and Claude. Track your rank on each assistant, who gets recommended alongside you, and how it all trends over time — running on your own AI Engine providers, no extra subscription.
 
 🚦 **Redirections & 404**
 A clean redirect manager paired with a 404 monitor. Spot broken links, convert any 404 into a redirect with one click, and let SEO Engine create 301s automatically when slugs change.
@@ -117,6 +120,29 @@ Powered by AI Engine — bring your own provider (OpenAI, Anthropic, Google, etc
 
 * Generates a featured image with AI when a post is missing one
 * Uploaded to your media library with proper title, description, and ALT text, then set as the post thumbnail
+
+== 📡 AI Visibility ==
+
+Search is moving into AI assistants. AI Visibility shows how your brand, product or site is recommended when people ask ChatGPT, Gemini and Claude the questions your buyers actually ask — and it runs entirely on your own AI Engine providers, with no extra subscription or credits.
+
+Add a brand, describe it, and let AI draft the buyer-intent questions to track (or write your own, in any language). SEO Engine then asks each AI assistant and reads the answers back for you.
+
+**What you see:**
+
+* Your rank on each AI service, side by side (OpenAI, Anthropic, Google...)
+* An overall AI Visibility score, trended over time
+* The competitors recommended alongside you, so you know who you're up against
+* Sentiment — how positively each assistant talks about you
+* The full transcripts behind every result, so nothing is a black box
+
+**How it works:**
+
+* Bring your own providers through AI Engine — your keys, your models, no metered add-on
+* Pick one model per provider (for example GPT, Claude and Gemini) and scan across all of them
+* Scans run from your browser, one question per provider at a time, so nothing times out
+* Every result records the exact model used, and the whole history is queryable over MCP
+
+Scans ask each provider directly, so they measure what the models already know about you from training rather than a live web search — which is what an assistant answers from memory.
 
 == 🚦 Redirections & 404 ==
 
@@ -268,6 +294,16 @@ No. The Redirections & 404 module handles URL redirects (301, 302, 307, 308, 410
 Yes, and it is fully automatic. When you publish or update a post, SEO Engine instantly notifies Bing, Yandex, Naver and every IndexNow-compatible engine, so your content gets crawled right away instead of waiting. The verification key is generated and served for you; there is nothing to configure. Note that Google does not use IndexNow and keeps reading your sitemap instead.
 
 == Changelog ==
+
+= 0.8.4 (2026/07/22) =
+* Add: custom instructions support for Magic Fix.
+* Update: AI Visibility module is now available in the Pro version only.
+
+= 0.8.3 (2026/07/22) =
+* Add: AI Visibility module to track how brands rank across AI assistants.
+* Update: Reworked the AI Visibility interface and made the scan safer and more reliable.
+* Update: Turned the mentions count into a small coverage meter.
+* Update: Extended SEO plugin compatibility mode to schema output and added a notice when another plugin renders the meta tags.
 
 = 0.8.2 (2026/07/18) =
 * Add: SEO plugin compatibility mode.

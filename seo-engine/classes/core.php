@@ -1260,6 +1260,7 @@ class Meow_MWSEO_Core
 			'mwai_has_mcp' => false,
 			'ai_engine_status' => false,
 			'ai_magic_fix' => false,
+			'magic_fix_instructions' => '',
 			'ai_auto_correct' => false,
 			'ai_magic_wand' => false,
 			'ai_keywords' => false,
@@ -1358,6 +1359,10 @@ class Meow_MWSEO_Core
 			'redirects_404_retention_days' => 30,
 			'redirects_404_exclude' => "/wp-admin/*\n/feed*\n/xmlrpc.php",
 			'redirects_skip_bots' => true,
+
+			// AI Visibility
+			'ai_visibility' => false,
+			'ai_visibility_surfaces' => [],
 
 			// Maintenance & Others
 			'logs' => false,
@@ -2182,6 +2187,16 @@ class Meow_MWSEO_Core
 			}
 		}
 	}
+
+	#region AI Visibility delegators
+
+	// AI Visibility is a Pro module (premium/aivisibility.php); it simply does not
+	// exist in the free build, so this returns null there.
+	function ai_visibility() {
+		return ( $this->pro && isset( $this->pro->ai_visibility ) ) ? $this->pro->ai_visibility : null;
+	}
+
+	#endregion
 
 	// TODO [2025]: Refactor to unified analytics provider interface
 	function get_analytics_data( $args = array() ) {

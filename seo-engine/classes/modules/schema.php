@@ -46,6 +46,12 @@ class Meow_MWSEO_Modules_Schema
 			return;
 		}
 
+		// Step back when another SEO plugin is handling the frontend output, so we don't
+		// emit a second JSON-LD block alongside theirs.
+		if ( !$this->core->should_render_frontend_meta() ) {
+			return;
+		}
+
 		global $post;
 		if ( !$post ) {
 			return;

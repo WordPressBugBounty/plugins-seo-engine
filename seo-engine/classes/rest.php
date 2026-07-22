@@ -629,6 +629,59 @@ class Meow_MWSEO_Rest
 			) );
 			#endregion
 
+			#region REST AI Visibility
+			register_rest_route( $this->namespace, '/ai_visibility/config', array(
+				'methods' => 'GET',
+				'permission_callback' => array( $this->core, 'can_access_settings' ),
+				'callback' => array( $this, 'rest_ai_visibility_config' )
+			) );
+			register_rest_route( $this->namespace, '/ai_visibility/surfaces', array(
+				'methods' => 'POST',
+				'permission_callback' => array( $this->core, 'can_access_settings' ),
+				'callback' => array( $this, 'rest_ai_visibility_save_surfaces' )
+			) );
+			register_rest_route( $this->namespace, '/ai_visibility/brands', array(
+				'methods' => 'GET',
+				'permission_callback' => array( $this->core, 'can_access_settings' ),
+				'callback' => array( $this, 'rest_ai_visibility_brands' )
+			) );
+			register_rest_route( $this->namespace, '/ai_visibility/brand/save', array(
+				'methods' => 'POST',
+				'permission_callback' => array( $this->core, 'can_access_settings' ),
+				'callback' => array( $this, 'rest_ai_visibility_save_brand' )
+			) );
+			register_rest_route( $this->namespace, '/ai_visibility/brand/delete', array(
+				'methods' => 'POST',
+				'permission_callback' => array( $this->core, 'can_access_settings' ),
+				'callback' => array( $this, 'rest_ai_visibility_delete_brand' )
+			) );
+			register_rest_route( $this->namespace, '/ai_visibility/brand/detail', array(
+				'methods' => 'POST',
+				'permission_callback' => array( $this->core, 'can_access_settings' ),
+				'callback' => array( $this, 'rest_ai_visibility_brand_detail' )
+			) );
+			register_rest_route( $this->namespace, '/ai_visibility/generate_queries', array(
+				'methods' => 'POST',
+				'permission_callback' => array( $this->core, 'can_access_settings' ),
+				'callback' => array( $this, 'rest_ai_visibility_generate_queries' )
+			) );
+			register_rest_route( $this->namespace, '/ai_visibility/scan/plan', array(
+				'methods' => 'POST',
+				'permission_callback' => array( $this->core, 'can_access_settings' ),
+				'callback' => array( $this, 'rest_ai_visibility_scan_plan' )
+			) );
+			register_rest_route( $this->namespace, '/ai_visibility/scan/one', array(
+				'methods' => 'POST',
+				'permission_callback' => array( $this->core, 'can_access_settings' ),
+				'callback' => array( $this, 'rest_ai_visibility_scan_one' )
+			) );
+			register_rest_route( $this->namespace, '/ai_visibility/scan/finalize', array(
+				'methods' => 'POST',
+				'permission_callback' => array( $this->core, 'can_access_settings' ),
+				'callback' => array( $this, 'rest_ai_visibility_scan_finalize' )
+			) );
+			#endregion
+
 		}
 		catch (Exception $e) {
 			var_dump($e);
@@ -3151,6 +3204,160 @@ class Meow_MWSEO_Rest
 				$count = $mod->clear_404s( $older_than );
 			}
 			return $this->success_response( array( 'deleted' => $count ) );
+		} catch ( Exception $e ) {
+			return $this->error_response( $e->getMessage(), 'exception', 500 );
+		}
+	}
+
+	#endregion
+
+	#region AI Visibility
+
+	private function get_ai_visibility_module() {
+		$mod = $this->core->ai_visibility();
+		// The module object exists even when the feature is off, but its tables
+		// do not, so anything that touches them must check is_enabled() first.
+		return ( $mod && $mod->is_enabled() ) ? $mod : null;
+	}
+
+	function rest_ai_visibility_config( $request ) {
+		try {
+			$mod = $this->get_ai_visibility_module();
+			if ( !$mod ) { return $this->error_response( 'AI Visibility module unavailable.', 'no_module', 500 ); }
+			return $this->success_response( array(
+				'overview' => $mod->get_overview(),
+				'surfaces' => $mod->get_surfaces(),
+				'options'  => $mod->get_surfaces_options(),
+			) );
+		} catch ( Exception $e ) {
+			return $this->error_response( $e->getMessage(), 'exception', 500 );
+		}
+	}
+
+	function rest_ai_visibility_save_surfaces( $request ) {
+		try {
+			$mod = $this->get_ai_visibility_module();
+			if ( !$mod ) { return $this->error_response( 'AI Visibility module unavailable.', 'no_module', 500 ); }
+			$params = $request->get_json_params();
+			$surfaces = isset( $params['surfaces'] ) ? $params['surfaces'] : array();
+			return $this->success_response( array( 'surfaces' => $mod->save_surfaces( $surfaces ) ) );
+		} catch ( Exception $e ) {
+			return $this->error_response( $e->getMessage(), 'exception', 500 );
+		}
+	}
+
+	function rest_ai_visibility_brands( $request ) {
+		try {
+			$mod = $this->get_ai_visibility_module();
+			if ( !$mod ) { return $this->error_response( 'AI Visibility module unavailable.', 'no_module', 500 ); }
+			return $this->success_response( array( 'brands' => $mod->list_brands() ) );
+		} catch ( Exception $e ) {
+			return $this->error_response( $e->getMessage(), 'exception', 500 );
+		}
+	}
+
+	function rest_ai_visibility_save_brand( $request ) {
+		try {
+			$mod = $this->get_ai_visibility_module();
+			if ( !$mod ) { return $this->error_response( 'AI Visibility module unavailable.', 'no_module', 500 ); }
+			$result = $mod->save_brand( $request->get_json_params() );
+			if ( is_wp_error( $result ) ) {
+				return $this->error_response( $result->get_error_message(), $result->get_error_code(), 400 );
+			}
+			return $this->success_response( array( 'brand' => $result ) );
+		} catch ( Exception $e ) {
+			return $this->error_response( $e->getMessage(), 'exception', 500 );
+		}
+	}
+
+	function rest_ai_visibility_delete_brand( $request ) {
+		try {
+			$mod = $this->get_ai_visibility_module();
+			if ( !$mod ) { return $this->error_response( 'AI Visibility module unavailable.', 'no_module', 500 ); }
+			$params = $request->get_json_params();
+			$id = isset( $params['id'] ) ? intval( $params['id'] ) : 0;
+			return $this->success_response( array( 'deleted' => $mod->delete_brand( $id ) ) );
+		} catch ( Exception $e ) {
+			return $this->error_response( $e->getMessage(), 'exception', 500 );
+		}
+	}
+
+	function rest_ai_visibility_brand_detail( $request ) {
+		try {
+			$mod = $this->get_ai_visibility_module();
+			if ( !$mod ) { return $this->error_response( 'AI Visibility module unavailable.', 'no_module', 500 ); }
+			$params = $request->get_json_params();
+			$id = isset( $params['id'] ) ? intval( $params['id'] ) : 0;
+			$brand = $mod->get_brand( $id );
+			if ( !$brand ) { return $this->error_response( 'Brand not found.', 'not_found', 404 ); }
+			return $this->success_response( array(
+				'brand'       => $brand,
+				'queries'     => $mod->get_brand_queries( $id ),
+				'competitors' => $mod->get_brand_competitors( $id ),
+				'transcripts' => $mod->get_brand_transcripts( $id ),
+				'timeseries'  => $mod->get_brand_timeseries( $id ),
+			) );
+		} catch ( Exception $e ) {
+			return $this->error_response( $e->getMessage(), 'exception', 500 );
+		}
+	}
+
+	function rest_ai_visibility_generate_queries( $request ) {
+		try {
+			$mod = $this->get_ai_visibility_module();
+			if ( !$mod ) { return $this->error_response( 'AI Visibility module unavailable.', 'no_module', 500 ); }
+			$result = $mod->generate_queries( $request->get_json_params() );
+			if ( is_wp_error( $result ) ) {
+				return $this->error_response( $result->get_error_message(), $result->get_error_code(), 400 );
+			}
+			return $this->success_response( array( 'queries' => $result ) );
+		} catch ( Exception $e ) {
+			return $this->error_response( $e->getMessage(), 'exception', 500 );
+		}
+	}
+
+	function rest_ai_visibility_scan_plan( $request ) {
+		try {
+			$mod = $this->get_ai_visibility_module();
+			if ( !$mod ) { return $this->error_response( 'AI Visibility module unavailable.', 'no_module', 500 ); }
+			$params = $request->get_json_params();
+			$id = isset( $params['id'] ) ? intval( $params['id'] ) : 0;
+			$plan = $mod->build_scan_plan( $id );
+			if ( is_wp_error( $plan ) ) {
+				return $this->error_response( $plan->get_error_message(), $plan->get_error_code(), 400 );
+			}
+			return $this->success_response( $plan );
+		} catch ( Exception $e ) {
+			return $this->error_response( $e->getMessage(), 'exception', 500 );
+		}
+	}
+
+	function rest_ai_visibility_scan_one( $request ) {
+		try {
+			$mod = $this->get_ai_visibility_module();
+			if ( !$mod ) { return $this->error_response( 'AI Visibility module unavailable.', 'no_module', 500 ); }
+			$params = $request->get_json_params();
+			$id = isset( $params['id'] ) ? intval( $params['id'] ) : 0;
+			$query = isset( $params['query'] ) ? (string) $params['query'] : '';
+			$surface = isset( $params['surface'] ) && is_array( $params['surface'] ) ? $params['surface'] : array();
+			$batch = isset( $params['batch'] ) ? (string) $params['batch'] : '';
+			$result = $mod->scan_one( $id, $query, $surface, $batch );
+			if ( is_wp_error( $result ) ) {
+				return $this->error_response( $result->get_error_message(), $result->get_error_code(), 400 );
+			}
+			return $this->success_response( $result );
+		} catch ( Exception $e ) {
+			return $this->error_response( $e->getMessage(), 'exception', 500 );
+		}
+	}
+
+	function rest_ai_visibility_scan_finalize( $request ) {
+		try {
+			$mod = $this->get_ai_visibility_module();
+			if ( !$mod ) { return $this->error_response( 'AI Visibility module unavailable.', 'no_module', 500 ); }
+			$params = $request->get_json_params();
+			$id = isset( $params['id'] ) ? intval( $params['id'] ) : 0;
+			return $this->success_response( array( 'brand' => $mod->finalize_scan( $id ) ) );
 		} catch ( Exception $e ) {
 			return $this->error_response( $e->getMessage(), 'exception', 500 );
 		}
