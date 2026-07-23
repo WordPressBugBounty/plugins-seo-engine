@@ -1006,16 +1006,8 @@ class Meow_MWSEO_Rest
 			'post_status' => $status,
 		];
 
-		// Add language filter if Polylang is active and a specific language is selected
-		if (function_exists('pll_get_post_language') && $language !== 'all') {
-			$args['tax_query'] = [
-				[
-					'taxonomy' => 'language',
-					'field'    => 'slug',
-					'terms'    => $language,
-				],
-			];
-		}
+		// Restrict to one language (Polylang / Bogo) when one is selected.
+		$args = $this->core->apply_language_filter( $args, $language );
 
 		if ($search) {
 			// Search in post title/content AND also in meta fields
@@ -1161,7 +1153,7 @@ class Meow_MWSEO_Rest
 				'edit_url' => get_edit_post_link($post->ID, 'raw'),
 				'can_edit' => current_user_can('edit_post', $post->ID),
 				'can_delete' => current_user_can('delete_post', $post->ID),
-				'language' => function_exists('pll_get_post_language') ? pll_get_post_language($post->ID, 'slug') : null,
+				'language' => $this->core->get_post_language_slug( $post->ID ),
 				'score' => $has_score ? $score_data : null,
 				'ignored_tests' => is_array($ignored_tests) ? $ignored_tests : [],
 				'fixed' => is_array($magic_fixes_applied) ? $magic_fixes_applied : [],
@@ -1313,17 +1305,8 @@ class Meow_MWSEO_Rest
 			'post_status' => ['publish', 'future', 'draft', 'pending', 'private'],
 		];
 
-		// Add language filter if Polylang is active and a specific language is selected
-		if (function_exists('pll_get_post_language') && $language !== 'all') {
-			// Set the language taxonomy query for Polylang
-			$args['tax_query'] = [
-				[
-					'taxonomy' => 'language',
-					'field'    => 'slug',
-					'terms'    => $language,
-				],
-			];
-		}
+		// Restrict to one language (Polylang / Bogo) when one is selected.
+		$args = $this->core->apply_language_filter( $args, $language );
 	
 		$query = new WP_Query($args);
 		$posts = $query->posts; // Get all posts
@@ -1433,7 +1416,7 @@ class Meow_MWSEO_Rest
 				'rendered_title' => $this->core->build_title($post),
 				'rendered_excerpt' => $this->core->build_excerpt($post),
 				'post_type' => $post->post_type,
-				'language' => function_exists('pll_get_post_language') ? pll_get_post_language($post_id, 'slug') : null,
+				'language' => $this->core->get_post_language_slug( $post_id ),
 				'score' => $has_score ? $score_data : null,
 				'ignored_tests' => is_array($ignored_tests) ? $ignored_tests : [],
 				'fixed' => is_array($magic_fixes_applied) ? $magic_fixes_applied : [],
@@ -2584,30 +2567,11 @@ class Meow_MWSEO_Rest
 	}
 
 	function rest_get_languages() {
-		// Check if Polylang is active
-		if ( function_exists( 'pll_languages_list' ) ) {
-			$languages = [];
-			$language_slugs = pll_languages_list();
-			$language_names = pll_languages_list(['fields' => 'name']);
-			
-			foreach ( $language_slugs as $index => $slug ) {
-				$languages[] = [
-					'slug' => $slug,
-					'name' => $language_names[$index]
-				];
-			}
-			
-			return new WP_REST_Response([
-				'success' => true,
-				'languages' => $languages,
-			], 200 );
-		} else {
-			// Return empty array if Polylang is not active
-			return new WP_REST_Response([
-				'success' => true,
-				'languages' => [],
-			], 200 );
-		}
+		// Polylang / Bogo; empty when no supported multilingual plugin is active.
+		return new WP_REST_Response([
+			'success' => true,
+			'languages' => $this->core->get_available_languages(),
+		], 200 );
 	}
 
 	#region Robots.txt

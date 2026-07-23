@@ -1835,8 +1835,8 @@ class Meow_MWSEO_Core
 	}
 
 	// Returns a human-readable language name for AI prompts.
-	// Falls back to the global 'language' option when Polylang/WPML is absent
-	// or the post has no language assigned.
+	// Falls back to the global 'language' option when no multilingual plugin is
+	// active or the post has no language assigned.
 	function get_post_language_name( $post_id ) {
 		$post_locale = null;
 		if ( function_exists( 'pll_get_post_language' ) ) {
@@ -1848,13 +1848,136 @@ class Meow_MWSEO_Core
 				$post_locale = $info['locale'];
 			}
 		}
+		elseif ( function_exists( 'bogo_get_post_locale' ) ) {
+			// Bogo stores the locale in the _locale meta and falls back to the
+			// site default itself, so this is always a usable locale.
+			$post_locale = bogo_get_post_locale( $post_id );
+		}
+		$name = null;
 		if ( $post_locale ) {
 			$name = $this->get_language_name( $post_locale );
-			if ( $name ) {
-				return $name;
-			}
 		}
-		return $this->get_option( 'language', 'English' );
+		if ( !$name ) {
+			$name = $this->get_option( 'language', 'English' );
+		}
+		// Escape hatch for setups we don't detect (custom or unsupported
+		// multilingual plugins): return the language AI should write in.
+		return apply_filters( 'mwseo_post_language_name', $name, $post_id, $post_locale );
+	}
+
+	/**
+	 * The post's language as an identifier used to group/filter posts, or null
+	 * when no multilingual plugin is active. Polylang and WPML return a short
+	 * slug ("fr"); Bogo returns the full locale ("fr_FR") because two Bogo
+	 * locales can share a slug and we need them to stay distinct.
+	 */
+	function get_post_language_slug( $post_id ) {
+		if ( function_exists( 'pll_get_post_language' ) ) {
+			$slug = pll_get_post_language( $post_id, 'slug' );
+			return $slug ? $slug : null;
+		}
+		if ( function_exists( 'wpml_get_language_information' ) ) {
+			$info = wpml_get_language_information( null, $post_id );
+			return ( !is_wp_error( $info ) && !empty( $info['language_code'] ) ) ? $info['language_code'] : null;
+		}
+		if ( function_exists( 'bogo_get_post_locale' ) ) {
+			$locale = bogo_get_post_locale( $post_id );
+			return $locale ? $locale : null;
+		}
+		return null;
+	}
+
+	/**
+	 * IDs of the post's translations. May include the post itself (callers merge
+	 * it into an exclusion list anyway).
+	 */
+	function get_post_translation_ids( $post_id ) {
+		if ( function_exists( 'pll_get_post_translations' ) ) {
+			$ids = pll_get_post_translations( $post_id );
+			return is_array( $ids ) ? array_values( array_map( 'intval', $ids ) ) : array();
+		}
+		if ( function_exists( 'wpml_get_language_information' ) ) {
+			global $sitepress;
+			$post = get_post( $post_id );
+			if ( $sitepress && $post ) {
+				$trid = $sitepress->get_element_trid( $post_id, 'post_' . $post->post_type );
+				$translations = $sitepress->get_element_translations( $trid, 'post_' . $post->post_type );
+				if ( is_array( $translations ) ) {
+					return array_values( array_map( 'intval', wp_list_pluck( $translations, 'element_id' ) ) );
+				}
+			}
+			return array();
+		}
+		if ( function_exists( 'bogo_get_post_translations' ) ) {
+			// Bogo returns WP_Post objects keyed by locale, and excludes the post itself.
+			$posts = bogo_get_post_translations( $post_id );
+			if ( is_array( $posts ) ) {
+				return array_values( array_map( function ( $p ) {
+					return isset( $p->ID ) ? (int) $p->ID : (int) $p;
+				}, $posts ) );
+			}
+			return array();
+		}
+		return array();
+	}
+
+	/**
+	 * Restrict WP_Query args to one language. $language is an identifier from
+	 * get_available_languages(); 'all' (or empty) means no filtering.
+	 */
+	function apply_language_filter( $args, $language ) {
+		if ( empty( $language ) || $language === 'all' ) {
+			return $args;
+		}
+		if ( function_exists( 'pll_get_post_language' ) ) {
+			$args['tax_query'][] = array(
+				'taxonomy' => 'language',
+				'field'    => 'slug',
+				'terms'    => $language,
+			);
+			return $args;
+		}
+		if ( function_exists( 'bogo_get_post_locale' ) ) {
+			$clause = array(
+				'relation' => 'OR',
+				array( 'key' => '_locale', 'value' => $language ),
+			);
+			// Posts in the site's default language often have no _locale row at
+			// all (Bogo only writes it for translations), so treat "missing" as
+			// the default locale.
+			$default = function_exists( 'bogo_get_default_locale' ) ? bogo_get_default_locale() : null;
+			if ( $default && $language === $default ) {
+				$clause[] = array( 'key' => '_locale', 'compare' => 'NOT EXISTS' );
+			}
+			$args['meta_query'][] = $clause;
+			return $args;
+		}
+		return $args;
+	}
+
+	/**
+	 * Languages available on the site, as [ [ 'slug' => ..., 'name' => ... ] ].
+	 * Empty when no supported multilingual plugin is active.
+	 */
+	function get_available_languages() {
+		$languages = array();
+		if ( function_exists( 'pll_languages_list' ) ) {
+			$slugs = pll_languages_list();
+			$names = pll_languages_list( array( 'fields' => 'name' ) );
+			foreach ( (array) $slugs as $i => $slug ) {
+				$languages[] = array( 'slug' => $slug, 'name' => $names[ $i ] ?? $slug );
+			}
+			return $languages;
+		}
+		if ( function_exists( 'bogo_available_locales' ) ) {
+			foreach ( (array) bogo_available_locales() as $locale ) {
+				$name = function_exists( 'bogo_get_language_native_name' )
+					? bogo_get_language_native_name( $locale ) : '';
+				$languages[] = array( 'slug' => $locale, 'name' => $name ? $name : $locale );
+			}
+			return $languages;
+		}
+		return $languages;
 	}
 
 	#endregion

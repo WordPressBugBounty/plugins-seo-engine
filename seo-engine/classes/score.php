@@ -1160,6 +1160,28 @@ class Meow_MWSEO_Score {
 			}
 		}
 
+		// Bogo keeps the language in the _locale meta rather than a taxonomy, so
+		// duplicates are scoped with a meta join instead.
+		if ( function_exists( 'bogo_get_post_locale' ) ) {
+			$locale = bogo_get_post_locale( $post->ID );
+			$default = function_exists( 'bogo_get_default_locale' ) ? bogo_get_default_locale() : null;
+			if ( $locale ) {
+				// Posts in the default language may have no _locale row at all.
+				$missing_is_default = ( $default && $locale === $default );
+				$count = $wpdb->get_var( $wpdb->prepare(
+					"SELECT COUNT(DISTINCT p.ID)
+					FROM $wpdb->posts p
+					LEFT JOIN $wpdb->postmeta pm ON pm.post_id = p.ID AND pm.meta_key = '_locale'
+					WHERE p.post_title = %s
+					AND p.ID != %d
+					AND p.post_status = 'publish'
+					AND ( pm.meta_value = %s" . ( $missing_is_default ? " OR pm.meta_id IS NULL" : "" ) . " )",
+					$analysis['title'], $post->ID, $locale
+				) );
+				return $count == 0 ? 100 : 0;
+			}
+		}
+
 		// Fallback: check sitewide if no language plugin or post has no language
 		$count = $wpdb->get_var( $wpdb->prepare(
 			"SELECT COUNT(*) FROM $wpdb->posts WHERE post_title = %s AND ID != %d AND post_status = 'publish'",
