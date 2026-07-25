@@ -66,7 +66,7 @@ class Meow_MWSEO_Modules_GoogleAnalytics
 		$this->client_id     = $this->core->get_option( 'google_analytics_client_id', '' );
 
 		if ( empty( $this->client_secret ) || empty( $this->client_id ) ) {
-			$this->core->log( "⚠️ Google Analytics not configured. Please set your Client ID and Client Secret in the settings." );
+			//$this->core->log( "⚠️ Google Analytics not configured. Please set your Client ID and Client Secret in the settings." );
 			return;
 		}
 
@@ -84,16 +84,26 @@ class Meow_MWSEO_Modules_GoogleAnalytics
   	
 	}
 
+	private function check_properties() {
+		if ( empty( $this->property_id ) || ! in_array( $this->property_id, $this->property_ids ) ) {
+			$this->core->log( "⚠️ Google Analytics property not set or invalid." );
+			return false;
+		}
+
+		return true;
+	}
+
 	public function is_authenticated() {
 
 		if ( empty( $this->client_secret ) || empty( $this->client_id ) ) {
 			return false;
 		}
 
-		if ( empty( $this->property_id ) || ! in_array( $this->property_id, $this->property_ids ) ) {
-			$this->core->log( "⚠️ Google Analytics property not set or invalid." );
-			return false;
-		}
+		// We don't need a property to be authenticated
+		// if ( empty( $this->property_id ) || ! in_array( $this->property_id, $this->property_ids ) ) {
+		// 	$this->core->log( "⚠️ Google Analytics property not set or invalid." );
+		// 	return false;
+		// }
 
 		if ( ! $this->current_access_token || ! $this->current_refresh_token || ! $this->current_expires_at ) {
 			return false;
@@ -351,6 +361,10 @@ class Meow_MWSEO_Modules_GoogleAnalytics
 			return array();
 		}
 
+		if ( !$this->check_properties() ) {
+			return array();
+		}
+
 		$defaults = array(
 			'start_date' => date( 'Y-m-d', strtotime( '-30 days' ) ),
 			'end_date' => date( 'Y-m-d' ),
@@ -398,6 +412,10 @@ class Meow_MWSEO_Modules_GoogleAnalytics
 			return array();
 		}
 
+		if ( !$this->check_properties() ) {
+			return array();
+		}
+
 		if ( !$start_date ) {
 			$start_date = date( 'Y-m-d', strtotime( '-30 days' ) );
 		}
@@ -442,6 +460,9 @@ class Meow_MWSEO_Modules_GoogleAnalytics
 	public function get_post_analytics( $page_path, $start_date = null, $end_date = null )
 	{
 		if ( !$this->is_authenticated() ) {
+			return array();
+		}
+		if ( !$this->check_properties() ) {
 			return array();
 		}
 
@@ -565,6 +586,10 @@ class Meow_MWSEO_Modules_GoogleAnalytics
 	public function get_top_posts( $args = array() )
 	{
 		if ( !$this->is_authenticated() ) {
+			return array();
+		}
+
+		if ( !$this->check_properties() ) {
 			return array();
 		}
 
@@ -1094,6 +1119,11 @@ class Meow_MWSEO_Modules_GoogleAnalytics
 		$access_token = $this->current_access_token;
 		if ( ! $access_token ) {
 			$this->core->log( "❌ Failed to obtain access token for realtime request" );
+			return false;
+		}
+
+		if ( ! isset( $this->property_id ) || empty( $this->property_id ) ) {
+			$this->core->log( "❌ Property ID is not set for realtime request" );
 			return false;
 		}
 

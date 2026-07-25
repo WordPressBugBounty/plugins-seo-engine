@@ -1,9 +1,13 @@
 <?php
 
 class Meow_MWSEO_MCP {
+  // Bulk tools walk posts in chunks this size, releasing the object cache between them
+  // so memory stays flat whatever the size of the site.
+  const BULK_CHUNK_SIZE = 50;
+
   private $core;
   private $api;
-  
+
   public function __construct( $core ) {
     $this->core = $core;
     
@@ -26,20 +30,102 @@ class Meow_MWSEO_MCP {
   }
 
   /**
+   * Walk every post matching $query_args, one chunk at a time.
+   *
+   * The bulk tools used to run get_posts( [ 'posts_per_page' => -1 ] ) and hold every
+   * WP_Post (post_content included) in memory at once. On sites with several hundred
+   * posts that ended in a fatal and an empty HTTP 500, which killed the whole MCP
+   * conversation for the client, not just the one tool.
+   *
+   * The ids are collected up front (they cost almost nothing to hold) and the posts are
+   * then fetched one chunk at a time, so this stays at one query per chunk with the meta
+   * cache primed by WP_Query, and the object cache is released between chunks. Fetching
+   * by id rather than paginating also means the loop cannot drift or spin if something
+   * filters the query.
+   *
+   * Any posts_per_page / offset in $query_args is ignored: this always walks them all.
+   */
+  private function each_post( $query_args ) {
+    $post_ids = get_posts( array_merge( $query_args, [
+      'posts_per_page' => -1,
+      'fields' => 'ids'
+    ] ) );
+
+    foreach ( array_chunk( $post_ids, self::BULK_CHUNK_SIZE ) as $chunk ) {
+      $posts = get_posts( array_merge( $query_args, [
+        'post__in' => $chunk,
+        'posts_per_page' => count( $chunk ),
+        'orderby' => 'post__in'
+      ] ) );
+
+      foreach ( $posts as $post ) {
+        yield $post;
+      }
+
+      $this->flush_runtime_cache();
+    }
+  }
+
+  /**
+   * Release the in-memory object cache so a long scan stays flat.
+   *
+   * wp_cache_supports() (WP 6.1+) has to be consulted first: core's compat shim calls
+   * _doing_it_wrong() for object cache drop-ins that don't advertise flush_runtime, and
+   * with WP_DEBUG on that notice can leak into the response body and break the JSON the
+   * MCP client parses. Such drop-ins simply keep their cache; deleting the entries
+   * instead would evict them from the persistent cache, which is worse.
+   */
+  private function flush_runtime_cache() {
+    if ( !function_exists( 'wp_cache_flush_runtime' ) ) {
+      return;
+    }
+    if ( function_exists( 'wp_cache_supports' ) && !wp_cache_supports( 'flush_runtime' ) ) {
+      return;
+    }
+    wp_cache_flush_runtime();
+  }
+
+  /**
+   * The description a post falls back to when it has no custom SEO excerpt, without
+   * running the content filter stack (see evaluate_effective_seo).
+   *
+   * Mirrors wp_trim_excerpt(): the manual excerpt wins, otherwise the raw content is
+   * trimmed with the same excerpt_length / excerpt_more filters, so the length we
+   * measure matches the excerpt the site actually outputs.
+   */
+  private function build_light_excerpt( $post ) {
+    if ( !empty( $post->post_excerpt ) ) {
+      return $post->post_excerpt;
+    }
+    $length = (int) apply_filters( 'excerpt_length', (int) _x( '55', 'excerpt_length' ) );
+    $more = apply_filters( 'excerpt_more', ' [&hellip;]' );
+    // wp_trim_words() strips the tags (and the block delimiter comments) for us.
+    return wp_trim_words( strip_shortcodes( $post->post_content ), $length, $more );
+  }
+
+  /**
    * Evaluate the effective SEO quality of a post.
    * Returns info about both custom and auto-generated SEO, plus any issues detected.
    * This helps distinguish between "no custom SEO" vs "actually problematic SEO".
+   *
+   * The description falls back to build_light_excerpt() rather than get_the_excerpt(),
+   * which renders blocks, shortcodes and embeds for every post it touches. That is fine
+   * for a single post but it exhausted memory across a whole site, so all the bulk
+   * tools share this lighter evaluation and report the same numbers.
    */
   private function evaluate_effective_seo( $post ) {
-    $effective_title = $this->core->get_seo_title( $post );
-    $effective_desc = $this->core->get_seo_excerpt( $post );
-
     $has_custom_title = (bool) get_post_meta( $post->ID, $this->core->meta_key_seo_title, true );
     $has_custom_desc = (bool) get_post_meta( $post->ID, $this->core->meta_key_seo_excerpt, true );
 
-    // Use display width instead of character count (CJK chars count as 2)
-    $title_width = $this->core->get_display_width( $effective_title );
-    $desc_width = $this->core->get_display_width( $effective_desc );
+    $effective_title = $this->core->get_seo_title( $post );
+    $effective_desc = $has_custom_desc ? $this->core->get_seo_excerpt( $post ) :
+      $this->build_light_excerpt( $post );
+
+    // Use display width instead of character count (CJK chars count as 2). Measured on
+    // the decoded text, since that is what ends up in the SERP: a custom title kept as
+    // "Cats &amp; Dogs" is 11 units wide, not 15.
+    $title_width = $this->core->get_display_width( html_entity_decode( (string) $effective_title ) );
+    $desc_width = $this->core->get_display_width( html_entity_decode( (string) $effective_desc ) );
 
     // Evaluate title quality (optimal: 30-75 display units)
     $title_issues = [];
@@ -1502,14 +1588,10 @@ class Meow_MWSEO_MCP {
           $issue_type = $args['issue_type'] ?? 'any';
           $limit = $args['limit'] ?? 50;
 
-          $posts = get_posts( [
-            'post_type' => $post_type,
-            'posts_per_page' => -1, // Get all, then filter
-            'post_status' => 'publish'
-          ] );
-
           $results = [];
-          foreach ( $posts as $post ) {
+          // Every post has to be evaluated to know whether it has an issue, so this walks
+          // the whole site in chunks and stops as soon as $limit matches are collected.
+          foreach ( $this->each_post( [ 'post_type' => $post_type, 'post_status' => 'publish' ] ) as $post ) {
             $seo_eval = $this->evaluate_effective_seo( $post );
 
             // Filter by issue type
@@ -1598,16 +1680,14 @@ class Meow_MWSEO_MCP {
           
           $query_args = [
             'post_type' => $args['post_type'] ?? 'post',
-            'posts_per_page' => -1,
             'date_query' => $date_query,
             'orderby' => 'date',
             'order' => 'DESC'
           ];
-          
-          $posts = get_posts( $query_args );
+
           $results = [];
-          
-          foreach ( $posts as $post ) {
+
+          foreach ( $this->each_post( $query_args ) as $post ) {
             $results[] = [
               'post_id' => $post->ID,
               'post_title' => $post->post_title,
@@ -1648,13 +1728,7 @@ class Meow_MWSEO_MCP {
           $all_titles = [];
           $duplicates = [];
           
-          $posts = get_posts( [
-            'post_type' => ['post', 'page'],
-            'posts_per_page' => -1,
-            'post_status' => 'publish'
-          ] );
-          
-          foreach ( $posts as $post ) {
+          foreach ( $this->each_post( [ 'post_type' => ['post', 'page'], 'post_status' => 'publish' ] ) as $post ) {
             $seo_title = get_post_meta( $post->ID, $this->core->meta_key_seo_title, true );
             if ( $seo_title ) {
               if ( isset( $all_titles[$seo_title] ) ) {
@@ -1700,28 +1774,19 @@ class Meow_MWSEO_MCP {
             'posts_needing_attention' => 0
           ];
 
-          $posts = get_posts( [
-            'post_type' => ['post', 'page'],
-            'posts_per_page' => -1,
-            'post_status' => 'publish'
-          ] );
-
           $total_score = 0;
           $scored_posts = 0;
 
-          foreach ( $posts as $post ) {
+          foreach ( $this->each_post( [ 'post_type' => ['post', 'page'], 'post_status' => 'publish' ] ) as $post ) {
             $stats['total_posts']++;
 
-            if ( get_post_meta( $post->ID, $this->core->meta_key_seo_title, true ) ) {
+            $seo_eval = $this->evaluate_effective_seo( $post );
+            if ( $seo_eval['has_custom_title'] ) {
               $stats['posts_with_seo_title']++;
             }
-
-            if ( get_post_meta( $post->ID, $this->core->meta_key_seo_excerpt, true ) ) {
+            if ( $seo_eval['has_custom_description'] ) {
               $stats['posts_with_seo_excerpt']++;
             }
-
-            // Evaluate effective SEO quality (custom or auto-generated)
-            $seo_eval = $this->evaluate_effective_seo( $post );
             if ( !empty( $seo_eval['title_issues'] ) ) {
               $stats['posts_with_title_issues']++;
             }
@@ -1752,8 +1817,8 @@ class Meow_MWSEO_MCP {
           }
 
           // Rates (renamed from "coverage" for clarity - low rate is fine if auto-generated SEO is good)
-          $stats['custom_title_rate'] = round( ( $stats['posts_with_seo_title'] / $stats['total_posts'] ) * 100, 1 );
-          $stats['custom_excerpt_rate'] = round( ( $stats['posts_with_seo_excerpt'] / $stats['total_posts'] ) * 100, 1 );
+          $stats['custom_title_rate'] = $stats['total_posts'] > 0 ? round( ( $stats['posts_with_seo_title'] / $stats['total_posts'] ) * 100, 1 ) : 0;
+          $stats['custom_excerpt_rate'] = $stats['total_posts'] > 0 ? round( ( $stats['posts_with_seo_excerpt'] / $stats['total_posts'] ) * 100, 1 ) : 0;
           // Keep old names for backward compatibility
           $stats['seo_title_coverage'] = $stats['custom_title_rate'];
           $stats['seo_excerpt_coverage'] = $stats['custom_excerpt_rate'];
