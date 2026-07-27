@@ -84,13 +84,13 @@ class Meow_MWSEO_Modules_Suggestions
 					return false;
 				}
 
-				// Gather the posts that match the keywords.
-				$posts = get_posts( [
+				// Gather the posts that match the keywords, in the post's own language.
+				$posts = get_posts( $core->apply_language_filter( [
 					's' => implode( ' ', $keywords ),
 					'post_type' => 'any',
 					'post_status' => 'publish',
 					'numberposts' => 5,
-				] );
+				], $core->get_post_language_slug( $post->ID ) ) );
 
 				if ( empty( $posts ) ) {
 					$core->log( "⚠️ No posts found for the keywords." );

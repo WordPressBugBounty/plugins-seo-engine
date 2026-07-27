@@ -137,6 +137,9 @@ class Meow_MWSEO_Sitemap extends WP_Sitemaps_Provider
       'posts_per_page' => $this->core->get_option( 'sitemap_post_max_pages', 100 ),
       'fields' => 'ids',
     ];
+    // A sitemap covers every language, and unlike get_url_list() below this is a
+    // WP_Query, so Bogo would narrow the count down to the site locale.
+    $args = $this->core->apply_language_filter( $args, 'all' );
 
     $query = new WP_Query( $args );
     return $query->max_num_pages;

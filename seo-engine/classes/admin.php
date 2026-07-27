@@ -15,23 +15,12 @@ class Meow_MWSEO_Admin extends MeowKit_MWSEO_Admin {
 
 			// Load the scripts only if they are needed by the current screen
 			$page = isset( $_GET["page"] ) ? sanitize_text_field( $_GET["page"] ) : null;
-			$post = isset( $_GET["post"] ) ? intval( $_GET["post"] ) : null;
-			$post_type = isset( $_GET["post_type"] ) ? sanitize_text_field( $_GET["post_type"] ) : null;
 
 			$is_seo_engine_screen = in_array( $page, [ MWSEO_PREFIX . '_settings', 'seo_engine_dashboard' ] );
 			$is_meowapps_dashboard = $page === 'meowapps-main-menu';
 			$is_surgical_screen = in_array( $page, [ 'mwseo_surgical_post', 'mwseo_surgical_page' ], true );
 
-			$is_wc_product = get_post_type( $post ) === 'product';
-			$is_wc_new_product = $post_type === 'product';
-
-			$is_wc_assistant_enabled = $this->core->get_option( 'woocommerce_assistant', false );
-
 			if ( $is_meowapps_dashboard || $is_seo_engine_screen || $is_surgical_screen ) {
-				add_action( 'admin_enqueue_scripts', array( $this, 'admin_enqueue_scripts' ) );
-			}
-
-			if ( $is_wc_assistant_enabled && ( $is_wc_product || $is_wc_new_product ) ) {
 				add_action( 'admin_enqueue_scripts', array( $this, 'admin_enqueue_scripts' ) );
 			}
 		}

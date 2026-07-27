@@ -296,6 +296,12 @@ class Meow_MWSEO_Rest
 				'callback' => array( $this, 'rest_generate_fields' )
 			) );
 
+			register_rest_route( $this->namespace, '/apply_woo_fields', array(
+				'methods' => 'POST',
+				'permission_callback' => array( $this->core, 'can_access_settings' ),
+				'callback' => array( $this, 'rest_apply_woo_fields' )
+			) );
+
 			// SEO
 			register_rest_route( $this->namespace, '/start_analysis', array(
 				'methods' => 'POST',
@@ -1893,6 +1899,25 @@ class Meow_MWSEO_Rest
 			], 200 );
 		}
 		catch( Exception $e)
+		{
+			return new WP_REST_Response([
+				'success' => false,
+				'message' => $e->getMessage(),
+			], 500 );
+		}
+	}
+
+	function rest_apply_woo_fields( $request ) {
+		try {
+			$params = $request->get_json_params();
+			$this->core->apply_woocommerce_fields( $params );
+
+			return new WP_REST_Response([
+				'success' => true,
+				'message' => 'OK',
+			], 200 );
+		}
+		catch( Exception $e )
 		{
 			return new WP_REST_Response([
 				'success' => false,

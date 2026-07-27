@@ -108,11 +108,6 @@ class Meow_MWSEO_Core
 			$this->parsers = new Meow_MWSEO_Helpers_Parsers( $this );
 		}
 
-		// Woocommerce
-		if ( $this->get_option( 'woocommerce_assistant', false ) ) {
-			add_action( 'add_meta_boxes', array( $this, 'add_wc_meta_boxes' ) );
-		}
-
 		// Advanced Core
 		if ( class_exists( 'MeowPro_MWSEO_Core' ) ) {
 			$this->pro = new MeowPro_MWSEO_Core( $this );
@@ -1268,6 +1263,7 @@ class Meow_MWSEO_Core
 			'full_analysis' => true, // Enable Full Analysis with Intelligence checks
 			'daily_insights' => true,
 			'woocommerce_assistant' => false,
+			'woo_assistant_instructions' => '',
 			'select_magic_fix' => [
 				'readability_score',
 			],
@@ -1476,56 +1472,102 @@ class Meow_MWSEO_Core
 			throw new Exception( 'AI Engine is not available.' );
 		}
 
-		$product_id = $params['post_id'];
+		$product_id = intval( $params['post_id'] ?? 0 );
+		$product = get_post( $product_id );
+		if ( !$product || $product->post_type !== 'product' ) {
+			throw new Exception( 'Product not found.' );
+		}
 
-		// We use the autosave that we force from the editor using AJAX so we get the actual content the user is editing
-		$last_product_autosave = wp_get_post_autosave( $product_id );
-		$product = $last_product_autosave ? $last_product_autosave : get_post( $product_id );
+		// Which fields to generate. Defaults to all of them.
+		$allowed_fields = [ 'seo_title', 'description', 'short_description', 'tags' ];
+		$fields = !empty( $params['fields'] ) && is_array( $params['fields'] )
+			? array_values( array_intersect( $allowed_fields, $params['fields'] ) )
+			: $allowed_fields;
+		if ( empty( $fields ) ) {
+			throw new Exception( 'No fields requested.' );
+		}
 
-		$product_data = [
-			'id' => $product_id,
-			'title' => $product->post_title,
-			'description' => $product->post_content,
-			'short_description' => $product->post_excerpt,
-			'categories' => wp_get_post_terms( $product_id, 'product_cat', array( 'fields' => 'names' ) ),
-			'tags' => wp_get_post_terms( $product_id, 'product_tag', array( 'fields' => 'names' ) ),
-			'attributes' => wc_get_product( $product_id )->get_attributes(),
-			'price' => wc_get_product( $product_id )->get_price(),
-		];
-
+		// In bulk mode we only rely on the product title (and the image via Vision),
+		// not on the existing descriptions/attributes.
+		$title_only = !empty( $params['title_only'] );
+		if ( $title_only ) {
+			$product_data = [
+				'id' => $product_id,
+				'title' => $product->post_title,
+			];
+		}
+		else {
+			$wc_product = function_exists( 'wc_get_product' ) ? wc_get_product( $product_id ) : null;
+			$product_data = [
+				'id' => $product_id,
+				'title' => $product->post_title,
+				'description' => $product->post_content,
+				'short_description' => $product->post_excerpt,
+				'categories' => wp_get_post_terms( $product_id, 'product_cat', array( 'fields' => 'names' ) ),
+				'tags' => wp_get_post_terms( $product_id, 'product_tag', array( 'fields' => 'names' ) ),
+				'attributes' => $wc_product ? $wc_product->get_attributes() : [],
+				'price' => $wc_product ? $wc_product->get_price() : null,
+			];
+		}
 
 		// Use Vision if enabled
-		$use_vision = $params['vision'];
+		$use_vision = !empty( $params['vision'] );
 		$vision_result = null;
 		if ( $use_vision ) {
 			$product_image = get_post_meta( $product_id, '_thumbnail_id', true );
 			if ( $product_image ) {
 
-				$prompt = "Describe the main elements in the image, the colors, the style, the context, and any text that is visible. Write it in {LANGUAGE}.";
+				$prompt = "Describe the main elements in the image, the colors, the style, the context, and any text that is visible. Write it in " . $params['language'] . ".";
 
-				$intermediate = image_get_intermediate_size( $product_id, 'medium' );
+				$intermediate = image_get_intermediate_size( $product_image, 'medium' );
 				$path = $intermediate 
-					? path_join( dirname( get_attached_file( $product_id ) ), $intermediate['file'] ) 
-					: get_attached_file( $product_id );
+					? path_join( dirname( get_attached_file( $product_image ) ), $intermediate['file'] ) 
+					: get_attached_file( $product_image );
 				$url = $intermediate 
-					? wp_get_attachment_image_url( $product_id, 'medium' ) 
-					: wp_get_attachment_url( $product_id );
+					? wp_get_attachment_image_url( $product_image, 'medium' ) 
+					: wp_get_attachment_url( $product_image );
 
-
-				$binary =  !empty( $path ) && file_exists( $path ) ? file_get_contents( $path ) : null;
-
-				if ( !$binary ) {
-					$vision_result = $mwai->simpleVisionQuery( $prompt, $url, $path, [ 'scope' => 'seo' ] );
+				if ( !file_exists( $path ) ) {
+					$this->log( "⚠️ WooCommerce Assistant: Product image file not found at {$path}" );
 				} else {
-					$vision_result = $mwai->simpleVisionQuery( $prompt, null, $binary, [ 'scope' => 'seo' ] );
+					// Cache vision results by file hash so the same image is only described once.
+					$file_hash    = md5_file( $path );
+					$transient_key = 'mwseo_vision_' . $file_hash;
+					$cached        = get_transient( $transient_key );
+
+					if ( $cached !== false ) {
+						$this->log( "🔍 WooCommerce Assistant: Using cached vision result for image hash {$file_hash}." );
+						$vision_result = $cached;
+					} else {
+						$vision_result = $mwai->simpleVisionQuery( $prompt, $url, $path, [ 'scope' => 'seo' ] );
+						if ( $vision_result ) {
+							set_transient( $transient_key, $vision_result, WEEK_IN_SECONDS );
+						}
+					}
 				}
+
 			}
 		}
-		
 
-		$prompt  = "Based on the product, write a description of this product (between 120 and 240 words), a short description (between 20-49 words), a SEO-friendly title, and tags (separated by commas). SEO and sales focused. Write it in {LANGUAGE}.";
+		$field_specs = [
+			'description' => 'a description of this product (between 120 and 240 words)',
+			'short_description' => 'a short description (between 20 and 49 words)',
+			'seo_title' => 'a SEO-friendly title',
+			'tags' => 'tags (separated by commas)',
+		];
+		$requested_specs = array_map( function( $field ) use ( $field_specs ) {
+			return $field_specs[ $field ];
+		}, $fields );
 
-		$prompt .= "\n\nHere are the user provided details about the product: {PRODUCT}.";
+		$prompt  = "Based on the product, write " . implode( ', ', $requested_specs ) . ". SEO and sales focused. Write it in {LANGUAGE}.";
+
+		if ( !empty( $params['product'] ) ) {
+			$prompt .= "\n\nHere are the user provided details about the product: {PRODUCT}.";
+		}
+
+		if ( !empty( $params['instructions'] ) ) {
+			$prompt .= "\n\nHere are general instructions from the user: " . $params['instructions'];
+		}
 
 		$prompt .= "\n\nHere are the details extracted from the product data: " . json_encode( $product_data );
 
@@ -1534,9 +1576,9 @@ class Meow_MWSEO_Core
 		}
 
 		$prompt  = apply_filters( 'mwseo_woo_product_prompt', $prompt );
-		$prompt .= "Your reply must be a formatted JSON only. Use these keys: description, short_description, seo_title, tags.";
+		$prompt .= "Your reply must be a formatted JSON only. Use these keys: " . implode( ', ', $fields ) . ".";
 
-		$prompt = str_replace( '{PRODUCT}',  $params['product'],  $prompt );
+		$prompt = str_replace( '{PRODUCT}',  $params['product'] ?? '',  $prompt );
 		$prompt = str_replace( '{LANGUAGE}', $params['language'], $prompt );
 
 		$response = $mwai->simpleTextQuery( $prompt );
@@ -1552,8 +1594,52 @@ class Meow_MWSEO_Core
 			$this->log( 'Response: ' .$response );
 			return false;
 		}
-		
-		return $json;
+
+		// Only return the requested fields.
+		return array_intersect_key( $json, array_flip( $fields ) );
+	}
+
+	function apply_woocommerce_fields( $params )
+	{
+		$product_id = intval( $params['post_id'] ?? 0 );
+		$product = get_post( $product_id );
+		if ( !$product || $product->post_type !== 'product' ) {
+			throw new Exception( 'Product not found.' );
+		}
+
+		$update = [ 'ID' => $product_id ];
+		if ( isset( $params['seo_title'] ) && trim( $params['seo_title'] ) !== '' ) {
+			$update['post_title'] = sanitize_text_field( $params['seo_title'] );
+		}
+		if ( isset( $params['description'] ) && trim( $params['description'] ) !== '' ) {
+			$update['post_content'] = wp_kses_post( $params['description'] );
+		}
+		if ( isset( $params['short_description'] ) && trim( $params['short_description'] ) !== '' ) {
+			$update['post_excerpt'] = wp_kses_post( $params['short_description'] );
+		}
+
+		if ( count( $update ) > 1 ) {
+			$result = wp_update_post( $update, true );
+			if ( is_wp_error( $result ) ) {
+				throw new Exception( $result->get_error_message() );
+			}
+		}
+
+		if ( !empty( $params['tags'] ) ) {
+			$tags = is_array( $params['tags'] ) ? $params['tags'] : explode( ',', $params['tags'] );
+			$tags = array_filter( array_map( function( $tag ) {
+				return sanitize_text_field( trim( $tag ) );
+			}, $tags ) );
+			if ( !empty( $tags ) ) {
+				// Append: existing tags are kept, already-present tags are not duplicated.
+				$result = wp_set_object_terms( $product_id, $tags, 'product_tag', true );
+				if ( is_wp_error( $result ) ) {
+					throw new Exception( $result->get_error_message() );
+				}
+			}
+		}
+
+		return true;
 	}
 
 	#endregion
@@ -1743,27 +1829,6 @@ class Meow_MWSEO_Core
 		);
 	}
 
-	function add_wc_meta_boxes()
-	{
-		if (get_post_type() !== 'product') {
-			return;
-		}
-
-		add_meta_box(
-			'mwseo-metadata',
-			__('SEO Engine', MWSEO_PREFIX),
-			array($this, 'render_wc_metadata_metabox'),
-			'product',
-			'side',
-			'high'
-		);
-	}
-
-	function render_wc_metadata_metabox()
-	{
-		echo '<div id="mwseo-admin-wc-assistant"></div>';
-	}
-
 	function get_language_name( $locale ) {
 		$locale_name_array = [
 			'en_US' => 'English (US)',
@@ -1923,9 +1988,20 @@ class Meow_MWSEO_Core
 
 	/**
 	 * Restrict WP_Query args to one language. $language is an identifier from
-	 * get_available_languages(); 'all' (or empty) means no filtering.
+	 * get_available_languages(); 'all' (or empty) means every language.
+	 *
+	 * Every query we run outside the admin has to go through this, even when no
+	 * language is selected: Bogo hooks parse_query and narrows ANY query it sees
+	 * down to get_locale() unless bogo_suppress_locale_query is set. REST requests
+	 * are not is_admin(), so without that opt-out our lists, scans and sitemaps
+	 * silently returned the site language only, and asking for another language
+	 * could never match (Bogo's own WHERE was already ANDed in).
 	 */
 	function apply_language_filter( $args, $language ) {
+		$is_bogo = function_exists( 'bogo_get_post_locale' );
+		if ( $is_bogo ) {
+			$args['bogo_suppress_locale_query'] = true;
+		}
 		if ( empty( $language ) || $language === 'all' ) {
 			return $args;
 		}
@@ -1937,7 +2013,10 @@ class Meow_MWSEO_Core
 			);
 			return $args;
 		}
-		if ( function_exists( 'bogo_get_post_locale' ) ) {
+		if ( $is_bogo ) {
+			// Filter on Bogo's _locale meta rather than its own 'lang' query var:
+			// get_posts() defaults to suppress_filters, so the WHERE clause Bogo
+			// builds from 'lang' would never run for half of our queries.
 			$clause = array(
 				'relation' => 'OR',
 				array( 'key' => '_locale', 'value' => $language ),

@@ -1640,9 +1640,7 @@ class Meow_MWSEO_Score {
 			// Only posts that have actually been analyzed.
 			'meta_query'     => [ [ 'key' => '_mwseo_analysis', 'compare' => 'EXISTS' ] ],
 		];
-		if ( $lang !== '' && function_exists( 'pll_get_post_language' ) ) {
-			$query_args['lang'] = $lang;
-		}
+		$query_args = $this->core->apply_language_filter( $query_args, $lang );
 
 		$ids = get_posts( $query_args );
 
@@ -1771,9 +1769,7 @@ class Meow_MWSEO_Score {
 			'order'          => 'DESC',
 			'meta_query'     => [ [ 'key' => '_mwseo_analysis', 'compare' => 'EXISTS' ] ],
 		];
-		if ( $lang !== '' && function_exists( 'pll_get_post_language' ) ) {
-			$query_args['lang'] = $lang;
-		}
+		$query_args = $this->core->apply_language_filter( $query_args, $lang );
 
 		$ids = get_posts( $query_args );
 		$posts = [];

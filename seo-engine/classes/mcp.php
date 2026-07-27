@@ -2003,9 +2003,7 @@ class Meow_MWSEO_MCP {
           if ( $created_after !== '' ) {
             $query_args['date_query'] = [ [ 'after' => $created_after, 'inclusive' => true ] ];
           }
-          if ( $lang !== '' && function_exists( 'pll_get_post_language' ) ) {
-            $query_args['lang'] = $lang;
-          }
+          $query_args = $this->core->apply_language_filter( $query_args, $lang );
 
           $candidates = get_posts( $query_args );
           $orphans = [];
