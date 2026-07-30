@@ -4,7 +4,7 @@ Tags: seo, redirection, sitemap, schema, analytics
 Donate link: https://www.patreon.com/meowapps
 Requires at least: 6.0
 Tested up to: 7.0
-Stable tag: 0.8.7
+Stable tag: 0.8.8
 Requires PHP: 7.4
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
@@ -63,7 +63,7 @@ Your content is your SEO foundation. SEO Engine helps you write better, rank hig
 
 **Multi-Language:**
 
-* Works with Polylang and WPML
+* Works with Polylang, WPML and Bogo
 * Automatic language detection for AI suggestions
 * Per-language SEO optimization
 
@@ -82,7 +82,7 @@ All the basics you need, without the bloat. Most SEO plugins bury essential feat
 
 Most plugins flag SEO issues; very few actually fix them. Magic Fix is SEO Engine's AI-powered fixer — it sits next to each detected issue as a quiet, in-context affordance. Click it, and AI generates a concrete suggestion you can review before anything is written to your post. No bulk "fix everything" button that rewrites your site behind your back; every change is shown to you as a search/replace diff first.
 
-Powered by AI Engine — bring your own provider (OpenAI, Anthropic, Google, etc.). All suggestions are generated in the post's language (Polylang and WPML supported).
+Powered by AI Engine — bring your own provider (OpenAI, Anthropic, Google, etc.). All suggestions are generated in the post's language (Polylang, WPML and Bogo supported).
 
 **Internal Links — section-aware suggestions:**
 
@@ -90,7 +90,7 @@ Powered by AI Engine — bring your own provider (OpenAI, Anthropic, Google, etc
 * AI ranks the most relevant related posts and proposes link placements split by section: Introduction, Body, Conclusion
 * Multiple placement strategies per target — link existing text (preferred), add a short parenthetical, or insert a new sentence
 * You pick which option (or none) to apply per suggested target post
-* Polylang and WPML aware: only candidates in the same language; translations of the current post are excluded
+* Polylang, WPML and Bogo aware: only candidates in the same language; translations of the current post are excluded
 
 **ALT Text — contextual generation:**
 
@@ -283,7 +283,7 @@ No. Google's official AI Optimization Guide (May 2026) confirms that AI Overview
 
 = What about multilingual sites? =
 
-SEO Engine works with Polylang, including post filtering and automatic AI language detection.
+SEO Engine works with Polylang, WPML and Bogo, including post filtering and automatic AI language detection.
 
 = Do I still need a separate Redirection plugin? =
 
@@ -294,6 +294,10 @@ No. The Redirections & 404 module handles URL redirects (301, 302, 307, 308, 410
 Yes, and it is fully automatic. When you publish or update a post, SEO Engine instantly notifies Bing, Yandex, Naver and every IndexNow-compatible engine, so your content gets crawled right away instead of waiting. The verification key is generated and served for you; there is nothing to configure. Note that Google does not use IndexNow and keeps reading your sitemap instead.
 
 == Changelog ==
+
+= 0.8.8 (2026/07/30) =
+* Update: Mentioned Bogo alongside Polylang and WPML in the readme.
+* Update: Reworked post type detection to use WordPress core functions instead of direct database queries.
 
 = 0.8.7 (2026/07/27) =
 * Fix: Bogo no longer limits queries to the site language, restoring the language filter, sitemap page count and internal link suggestions.

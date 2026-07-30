@@ -301,8 +301,9 @@ class Meow_MWSEO_Core
 	}
 
 	function get_post_types() {
-		global $wpdb;
-		$post_types = $wpdb->get_col( "SELECT DISTINCT post_type FROM $wpdb->posts" );
+		// global $wpdb;
+		// $post_types = $wpdb->get_col( "SELECT DISTINCT post_type FROM $wpdb->posts" );
+		$post_types = get_post_types( array( 'public' => true ), 'names', 'and' );
 		
 		// Exclude post types that don't need SEO
 		$excluded_types = array( 'revision', 'wp_global_styles', 'wp_navigation' );
