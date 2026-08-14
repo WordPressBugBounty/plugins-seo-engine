@@ -714,6 +714,8 @@ class Meow_MWSEO_Score {
 		global $mwseo_readability, $mwai;
 
 		$content = $analysis['content'];
+		$content_html = $analysis['content_html'];
+
 		if ( empty( $content ) ) {
 			return [ 'score' => 100, 'feedback' => '' ];
 		}
@@ -724,7 +726,7 @@ class Meow_MWSEO_Score {
 			$mwseo_readability = new Meow_MWSEO_Modules_Readability();
 		}
 
-		$result = $mwseo_readability->calculate_readability( $content );
+		$result = $mwseo_readability->calculate_readability( $content_html );
 		$score = (int) ( $result['score'] ?? 0 );
 
 		// Build feedback from the suggestions the module produced.
@@ -845,7 +847,7 @@ class Meow_MWSEO_Score {
 		$tests['title_exists'] = $this->test_title_exists( $analysis );
 		$tests['title_unique_sitewide'] = $this->test_title_unique( $post, $analysis );
 		$tests['title_length'] = $this->test_title_length( $post, $analysis );
-		$tests['slug_structure'] = $this->test_slug_structure( $analysis );
+		$tests['slug_structure'] = $this->test_slug_structure( $post, $analysis );
 		$tests['internal_links'] = $this->test_internal_links( $analysis );
 		$tests['external_link_present'] = $this->test_external_link_present( $analysis );
 		$tests['not_orphaned'] = $this->test_not_orphaned( $post, $analysis );
@@ -1216,7 +1218,14 @@ class Meow_MWSEO_Score {
 		return $this->score_length_range( $width, $min, $max );
 	}
 
-	private function test_slug_structure( $analysis ) {
+	private function test_slug_structure( $post, $analysis ) {
+		// The home page (static front page or blog index) has no meaningful slug
+		// to optimize, so it always passes.
+		if ( (int) get_option( 'page_on_front' ) === (int) $post->ID
+			|| (int) get_option( 'page_for_posts' ) === (int) $post->ID ) {
+			return 100;
+		}
+
 		$slug = $analysis['slug'];
 		$len = mb_strlen( $slug );
 		$words = explode( '-', $slug );
@@ -1899,14 +1908,44 @@ class Meow_MWSEO_Score {
 		// Simplified: check if post appears in any other post's content
 		global $wpdb;
 
+		static $cache = [];
+		if ( isset( $cache[$post->ID] ) ) {
+			return $cache[$post->ID];
+		}
+
 		$permalink = get_permalink( $post->ID );
+		$patterns = [ $permalink ];
+
+		// Also check common relative URL forms: root-relative paths and query strings.
+		$parsed = parse_url( $permalink );
+		if ( !empty( $parsed['path'] ) && $parsed['path'] !== '/' ) {
+			$patterns[] = $parsed['path'];
+			$path_without_trailing_slash = rtrim( $parsed['path'], '/' );
+			if ( $path_without_trailing_slash !== $parsed['path'] ) {
+				$patterns[] = $path_without_trailing_slash;
+			}
+		}
+		
+		$patterns[] = '?p=' . $post->ID;
+		
+		$patterns = array_unique( array_filter( $patterns ) );
+
+		$likes = [];
+		$args = [ $post->ID ];
+		foreach ( $patterns as $pattern ) {
+			$likes[] = 'post_content LIKE %s';
+			$args[] = '%' . $wpdb->esc_like( $pattern ) . '%';
+		}
+
 		$count = $wpdb->get_var( $wpdb->prepare(
-			"SELECT COUNT(*) FROM $wpdb->posts WHERE ID != %d AND post_status = 'publish' AND post_content LIKE %s",
-			$post->ID,
-			'%' . $wpdb->esc_like( $permalink ) . '%'
+			"SELECT COUNT(*) FROM $wpdb->posts WHERE ID != %d AND post_status = 'publish' AND (" . implode( ' OR ', $likes ) . ")",
+			...$args
 		) );
 
-		return $count == 0;
+		$is_orphaned = ( $count == 0 );
+		$cache[$post->ID] = $is_orphaned;
+
+		return $is_orphaned;
 	}
 
 	private function has_canonical( $post ) {

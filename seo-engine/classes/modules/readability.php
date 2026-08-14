@@ -33,6 +33,10 @@ class Meow_MWSEO_Modules_Readability
 		return ( count( $matches[0] ) / $len ) >= $threshold;
 	}
 
+	private function is_html_php( $string ) {
+		return $string !== strip_tags( $string );
+	}
+
 	/**
 	 * Score a post's content for clarity and human-skimmability.
 	 *
@@ -44,6 +48,14 @@ class Meow_MWSEO_Modules_Readability
 	 */
 	public function calculate_readability( $content_html ) {
 		$content_html = (string) $content_html;
+
+		if( ! $this->is_html_php( $content_html ) ) {
+			return [
+				'score' => 0,
+				'breakdown' => [ 'structure' => 0, 'lists' => 0, 'clarity' => 0 ],
+				'suggestions' => [ 'Non-HTML content cannot be scored for readability properly.' ],
+			];
+		}
 
 		// Empty content: score 0, one suggestion.
 		if ( trim( strip_tags( $content_html ) ) === '' ) {

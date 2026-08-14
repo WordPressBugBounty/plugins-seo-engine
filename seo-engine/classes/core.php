@@ -153,6 +153,10 @@ class Meow_MWSEO_Core
 			new Meow_MWSEO_MCP( $this );
 		}
 
+		// AI Engine integration: fills the SEO block in AI Engine's Modules tab.
+		// The filter is harmless when AI Engine is absent, so no gating needed.
+		new Meow_MWSEO_Modules_AIEngine( $this );
+
 		
 	}
 
@@ -2463,6 +2467,14 @@ class Meow_MWSEO_Core
 		}
 
 		return $this->analytics_module->query_bot_traffic( $args );
+	}
+
+	function get_bots_by_type( $type ) {
+		if ( !isset( $this->analytics_module ) ) {
+			return array();
+		}
+
+		return $this->analytics_module->get_bots_by_type( $type );
 	}
 
 	function rank_posts_for_bots( $args = array() ) {
