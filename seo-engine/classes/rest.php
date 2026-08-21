@@ -947,6 +947,12 @@ class Meow_MWSEO_Rest
 	}
 
 	function rest_posts($request) {
+		// The old implementation hydrated the whole library (full posts + all meta) before
+		// slicing one page out: ~110MB for 61 pages, an OOM crash on 128M hosts. It now
+		// works in three passes (ids -> targeted meta for counts/sort -> hydrate one page).
+		// The raise stays as belt-and-braces for the hosts that allow it; REST requests
+		// don't get the admin bump WordPress gives wp-admin.
+		wp_raise_memory_limit( 'admin' );
 		$post_type = $this->core->get_option('default_post_type', 'post');
 
 		// When 'any' is selected, use only the enabled post types from settings
@@ -956,12 +962,15 @@ class Meow_MWSEO_Rest
 
 		$params = $request->get_json_params();
 
-		// Optional post_type override (used by the standalone Surgical SEO manager so the
-		// Pages page can scope itself without mutating the shared default_post_type option).
-		// Purely additive — the dashboard tab never sends post_type, so it is unaffected.
+		// Optional post_type override. The standalone Surgical SEO manager scopes itself with
+		// it, and the dashboard sends it too (optimistically, before the shared
+		// default_post_type option finishes saving, so the list never queries stale filters).
 		if ( !empty( $params['post_type'] ) ) {
 			$allowed = (array) $this->core->get_option( 'select_post_types', ['post', 'page'] );
-			if ( in_array( $params['post_type'], $allowed, true ) ) {
+			if ( $params['post_type'] === 'any' ) {
+				$post_type = $allowed;
+			}
+			else if ( in_array( $params['post_type'], $allowed, true ) ) {
 				$post_type = $params['post_type'];
 			}
 		}
@@ -979,9 +988,11 @@ class Meow_MWSEO_Rest
 		$show_all = $filter == 'all' || $opportunity !== null;
 		$filter = $show_all ? null : $filter;
 
-		// Get language filter
-		$language = isset($params['language']) ? $params['language'] : null;
-		if (empty($language) || $language === 'all') {
+		// Get language filter. An explicit 'all' from the client means every language; only
+		// fall back to the saved option when the request doesn't say (otherwise picking
+		// "All Languages" could never win over a saved default_language).
+		$language = isset($params['language']) && $params['language'] !== '' ? $params['language'] : null;
+		if ($language === null) {
 			$language = $this->core->get_option('default_language', 'all');
 		}
 
@@ -1005,12 +1016,31 @@ class Meow_MWSEO_Rest
 			'all' => 0,
 		];
 
+		// ---- Pass 1: matching IDs only ----
+		// The library is queried as bare IDs (the DB handles the cheap sorts), statuses and
+		// counts come from targeted meta queries below, and only the current page is hydrated
+		// into full post objects. Loading every matching post with content + full meta cache
+		// sat around 110MB for 61 pages on a 128M host, and guaranteed OOM on big libraries.
+		$accessor = isset( $sort['accessor'] ) ? $sort['accessor'] : null;
+		$sort_dir = isset( $sort['by'] ) && strtolower( (string) $sort['by'] ) === 'asc' ? 'ASC' : 'DESC';
+
 		$args = [
 			'post_type' => $post_type,
 			'posts_per_page' => -1,
-			'nopaging' => true,
 			'post_status' => $status,
+			'fields' => 'ids',
+			'no_found_rows' => true,
 		];
+
+		// id and title order straight from the DB; metric sorts run on the id list below.
+		if ( $accessor === 'id' ) {
+			$args['orderby'] = 'ID';
+			$args['order'] = $sort_dir;
+		}
+		else if ( $accessor === 'title' ) {
+			$args['orderby'] = 'title';
+			$args['order'] = $sort_dir;
+		}
 
 		// Restrict to one language (Polylang / Bogo) when one is selected.
 		$args = $this->core->apply_language_filter( $args, $language );
@@ -1040,26 +1070,88 @@ class Meow_MWSEO_Rest
 		}
 
 		$query = new WP_Query($args);
-		$posts = $query->posts;
-
-		// PERFORMANCE FIX: Prime meta cache to avoid N+1 queries
-		// Extract post IDs for cache priming
-		$post_ids = wp_list_pluck($posts, 'ID');
-		if (!empty($post_ids)) {
-			// Prime post meta cache (all meta for these posts loaded in 1-2 queries)
-			update_meta_cache('post', $post_ids);
-			// Prime thumbnail cache
-			update_postmeta_cache($post_ids);
-		}
+		$post_ids = array_map( 'intval', $query->posts );
 
 		$excluded_posts = $this->core->get_option( 'sitemap_excluded_post_ids', [] );
 		$excluded_posts = array_map( 'intval', $excluded_posts );
+		$excluded_lookup = array_flip( $excluded_posts );
+
+		// ---- Pass 2: skip status + overall score for every match (scalar metas only) ----
+		// The pre-migration keys are read as fallbacks so never-migrated posts still count
+		// right; the real key migration happens below, only for the hydrated page. The
+		// analysis arrays themselves are NOT pulled here: they can be heavy, and only the
+		// scalar overall is needed for counts and the score sort.
+		global $wpdb;
+		$skip_map = [];
+		$overall_map = [];
+		$has_analysis = [];
+		foreach ( array_chunk( $post_ids, 5000 ) as $chunk ) {
+			$in = implode( ',', $chunk );
+			$rows = $wpdb->get_results(
+				"SELECT post_id, meta_key, meta_value FROM {$wpdb->postmeta}
+				WHERE post_id IN ($in)
+				AND meta_key IN ('_mwseo_status', '_seo_status', '_mwseo_overall', '_seo_engine_overall')",
+				ARRAY_A
+			);
+			foreach ( (array) $rows as $r ) {
+				$pid = (int) $r['post_id'];
+				if ( $r['meta_key'] === '_mwseo_status' || $r['meta_key'] === '_seo_status' ) {
+					if ( $r['meta_value'] === 'skip' ) $skip_map[ $pid ] = true;
+				}
+				else if ( $r['meta_value'] !== '' && $r['meta_value'] !== null ) {
+					$overall_map[ $pid ] = (int) $r['meta_value'];
+				}
+			}
+			// Which posts have an analysis at all: ids only, never the values.
+			$with_analysis = $wpdb->get_col(
+				"SELECT DISTINCT post_id FROM {$wpdb->postmeta}
+				WHERE post_id IN ($in) AND meta_key IN ('_mwseo_analysis', '_seo_engine_data')"
+			);
+			foreach ( (array) $with_analysis as $pid ) { $has_analysis[ (int) $pid ] = true; }
+		}
+		// Analyses that predate the scalar overall meta: read just those arrays, in small
+		// batches, to recover the score.
+		$missing_overall = array_values( array_diff( array_keys( $has_analysis ), array_keys( $overall_map ) ) );
+		foreach ( array_chunk( $missing_overall, 500 ) as $chunk ) {
+			$in = implode( ',', $chunk );
+			$rows = $wpdb->get_results(
+				"SELECT post_id, meta_value FROM {$wpdb->postmeta}
+				WHERE post_id IN ($in) AND meta_key IN ('_mwseo_analysis', '_seo_engine_data')",
+				ARRAY_A
+			);
+			foreach ( (array) $rows as $r ) {
+				$pid = (int) $r['post_id'];
+				if ( isset( $overall_map[ $pid ] ) ) continue;
+				$analysis = maybe_unserialize( $r['meta_value'] );
+				if ( is_array( $analysis ) && isset( $analysis['overall'] ) ) {
+					$overall_map[ $pid ] = (int) $analysis['overall'];
+				}
+				unset( $analysis );
+			}
+		}
+
+		// Work status per post: same rules as the row rendering (skip wins; a score only
+		// counts when an analysis actually exists; everything else is pending).
+		$statuses = [];
+		foreach ( $post_ids as $pid ) {
+			if ( isset( $skip_map[ $pid ] ) ) {
+				$statuses[ $pid ] = 'skip';
+			}
+			else if ( isset( $overall_map[ $pid ] ) && isset( $has_analysis[ $pid ] ) ) {
+				$statuses[ $pid ] = $overall_map[ $pid ] <= 50 ? 'issue' : 'ok';
+			}
+			else {
+				$statuses[ $pid ] = 'pending';
+			}
+			$total_counts[ $statuses[ $pid ] ]++;
+			if ( $statuses[ $pid ] !== 'skip' ) {
+				$total_counts['all']++;
+			}
+		}
 
 		// ---- Audience metrics (Search Console) ----
-		// Fetched before the loop so rows are enriched and opportunity views are counted in one
-		// pass. cached_only: the list never blocks on a cold GSC round trip; a live call is only
+		// cached_only: the list never blocks on a cold GSC round trip; a live call is only
 		// allowed when the user explicitly picks a metric sort or an opportunity view.
-		$accessor = isset( $sort['accessor'] ) ? $sort['accessor'] : null;
 		$needs_gsc_live = in_array( $accessor, ['impressions', 'clicks', 'position'], true ) || $opportunity !== null;
 		$gsc_map = $this->core->get_gsc_post_metrics_map( $needs_gsc_live ? [] : [ 'cached_only' => true ] );
 		$has_gsc_data = !empty( $gsc_map );
@@ -1082,40 +1174,16 @@ class Meow_MWSEO_Rest
 		$opportunity_counts = [ 'quick_wins' => 0, 'low_ctr' => 0, 'invisible' => 0 ];
 		$quick_wins_potential = 0;
 
-		$data = [];
-		foreach ($posts as $post) {
-			// Migrate old meta keys to new ones (runs once per post)
-			$this->core->migrate_post_meta_keys($post->ID);
+		// Opportunity view counts cover every non-skipped post, whatever filter is active,
+		// so the chips always show the library-wide picture. Status filters and opportunity
+		// views are applied on the id list in the same pass.
+		$filtered_ids = [];
+		foreach ( $post_ids as $pid ) {
+			$post_status_view = $statuses[ $pid ];
+			$gsc_row = isset( $gsc_map[ $pid ] ) ? $gsc_map[ $pid ] : null;
+			$no_index = isset( $excluded_lookup[ $pid ] );
 
-			// Check if post is marked as skip
-			$skip_status = get_post_meta($post->ID, '_mwseo_status', true);
-			$is_skip = $skip_status === 'skip';
-
-			// Get score data
-			$score_data = get_post_meta($post->ID, '_mwseo_analysis', true);
-			$has_score = !empty($score_data);
-
-			// Determine status
-			if ($is_skip) {
-				$status = 'skip';
-			} else if ($has_score && isset($score_data['overall'])) {
-				$score = $score_data['overall'];
-				$status = $score <= 50 ? 'issue' : 'ok';
-			} else {
-				$status = 'pending';
-			}
-
-			// Update counts
-			$total_counts[$status]++;
-			if ($status !== 'skip') {
-				$total_counts['all']++;
-			}
-
-			// Opportunity view counts cover every non-skipped post, whatever filter is active,
-			// so the chips always show the library-wide picture.
-			$gsc_row = isset( $gsc_map[ $post->ID ] ) ? $gsc_map[ $post->ID ] : null;
-			$no_index = in_array( $post->ID, $excluded_posts );
-			if ( $has_gsc_data && $status !== 'skip' ) {
+			if ( $has_gsc_data && $post_status_view !== 'skip' ) {
 				foreach ( [ 'quick_wins', 'low_ctr', 'invisible' ] as $view ) {
 					if ( $opportunity_match( $view, $gsc_row, $no_index ) ) {
 						$opportunity_counts[ $view ]++;
@@ -1127,66 +1195,59 @@ class Meow_MWSEO_Rest
 			}
 
 			// Apply filter (All excludes skip)
-			if ($show_all && $status === 'skip') {
-				continue;
-			}
-			if ($filter && $status !== $filter) {
-				continue;
-			}
+			if ( $show_all && $post_status_view === 'skip' ) continue;
+			if ( $filter && $post_status_view !== $filter ) continue;
+			if ( $opportunity !== null && !$opportunity_match( $opportunity, $gsc_row, $no_index ) ) continue;
 
-			$ignored_tests = get_post_meta($post->ID, '_mwseo_ignored_tests', true);
-			$magic_fixes_applied = get_post_meta($post->ID, '_mwseo_issues_fixed', true);
-			// Get AI agents data for this post
-			$ai_agents_data = $this->core->get_ai_agents_by_post($post->ID, 30);
-
-			// TODO: meta_key_seo_title and meta_key_seo_excerpt should migrate to _mwseo_title and _mwseo_excerpt
-			$data[] = [
-				'id' => $post->ID,
-				'title' => $post->post_title,
-				'excerpt' => $post->post_excerpt,
-				'slug' => $post->post_name,
-				'permalink' => get_permalink($post->ID),
-				'status' => $this->core->get_seo_engine_post_meta($post),
-				'publish_date' => $post->post_date,
-				'featured_image' => get_the_post_thumbnail_url($post->ID, 'medium'),
-				'seo_title' => get_post_meta($post->ID, $this->core->meta_key_seo_title, true),
-				'seo_excerpt' => get_post_meta($post->ID, $this->core->meta_key_seo_excerpt, true),
-				'rendered_title' => $this->core->build_title($post),
-				'rendered_excerpt' => $this->core->build_excerpt($post),
-				'post_type' => $post->post_type,
-				'post_status' => $post->post_status,
-				'author_name' => get_the_author_meta('display_name', $post->post_author),
-				'edit_url' => get_edit_post_link($post->ID, 'raw'),
-				'can_edit' => current_user_can('edit_post', $post->ID),
-				'can_delete' => current_user_can('delete_post', $post->ID),
-				'language' => $this->core->get_post_language_slug( $post->ID ),
-				'score' => $has_score ? $score_data : null,
-				'ignored_tests' => is_array($ignored_tests) ? $ignored_tests : [],
-				'fixed' => is_array($magic_fixes_applied) ? $magic_fixes_applied : [],
-				'ai_agents' => $ai_agents_data,
-				'ai_bots_total' => is_array( $ai_agents_data['grouped'] ?? null ) ? array_sum( $ai_agents_data['grouped'] ) : 0,
-				'gsc' => $gsc_row,
-				'no_index' => $no_index,
-				'canonical_url' => get_post_meta($post->ID, '_mwseo_canonical', true),
-			];
+			$filtered_ids[] = $pid;
 		}
 
-		wp_reset_postdata();
-
-		// Visitor totals are only needed for the visitors sort (one batched, cached query).
+		// ---- Metric maps for the sorts that need them (batched, filtered ids only) ----
+		$visitor_totals = [];
 		if ( $accessor === 'visitors' ) {
-			$visitor_totals = $this->core->get_posts_visitor_totals( array_column( $data, 'id' ), 30 );
-			foreach ( $data as &$row ) {
-				$row['visitors_30d'] = isset( $visitor_totals[ $row['id'] ] ) ? (int) $visitor_totals[ $row['id'] ] : 0;
+			// Analytics must never take the posts list down (the GA4 client throws on API
+			// errors); the sort simply degrades to zeros.
+			try {
+				$visitor_totals = $this->core->get_posts_visitor_totals( $filtered_ids, 30 );
 			}
-			unset( $row );
+			catch ( Exception $e ) {
+				$visitor_totals = array();
+			}
+		}
+		$aibots_totals = [];
+		if ( $accessor === 'aibots' ) {
+			$aibots_totals = $this->core->get_ai_bots_totals_by_posts( $filtered_ids, 30 );
 		}
 
-		// ---- Opportunity views (thresholds match the Search Console Quick Wins logic) ----
-		if ( $opportunity !== null ) {
-			$data = array_values( array_filter( $data, function( $row ) use ( $opportunity, $opportunity_match ) {
-				return $opportunity_match( $opportunity, $row['gsc'], !empty( $row['no_index'] ) );
-			} ) );
+		// ---- Sort the id list (id and title were already ordered by the DB) ----
+		if ( in_array( $accessor, [ 'score', 'impressions', 'clicks', 'position', 'visitors', 'aibots' ], true ) ) {
+			$value_of = function( $pid ) use ( $accessor, $overall_map, $has_analysis, $gsc_map, $visitor_totals, $aibots_totals ) {
+				if ( $accessor === 'score' ) {
+					return ( isset( $overall_map[ $pid ] ) && isset( $has_analysis[ $pid ] ) ) ? $overall_map[ $pid ] : null;
+				}
+				if ( $accessor === 'visitors' ) {
+					return isset( $visitor_totals[ $pid ] ) ? (int) $visitor_totals[ $pid ] : 0;
+				}
+				if ( $accessor === 'aibots' ) {
+					return isset( $aibots_totals[ $pid ] ) ? (int) $aibots_totals[ $pid ] : 0;
+				}
+				$v = isset( $gsc_map[ $pid ][ $accessor ] ) ? (float) $gsc_map[ $pid ][ $accessor ] : null;
+				// A zero position means "no ranking data", not "rank zero".
+				if ( $accessor === 'position' && $v !== null && $v <= 0 ) $v = null;
+				return $v;
+			};
+			$asc = $sort_dir === 'ASC';
+			usort( $filtered_ids, function( $a, $b ) use ( $value_of, $asc ) {
+				$va = $value_of( $a );
+				$vb = $value_of( $b );
+				// Posts without data always go to the end, whatever the direction.
+				if ( $va === null && $vb === null ) return 0;
+				if ( $va === null ) return 1;
+				if ( $vb === null ) return -1;
+				if ( $va == $vb ) return 0;
+				if ( $asc ) return ( $va < $vb ) ? -1 : 1;
+				return ( $va > $vb ) ? -1 : 1;
+			} );
 		}
 
 		// Library-wide opportunity counts for the view chips (null when GSC has no data yet).
@@ -1197,79 +1258,75 @@ class Meow_MWSEO_Rest
 			'quick_wins_potential' => (int) $quick_wins_potential,
 		] : null;
 
-		// Sort data based on sort parameters
-		if (isset($sort['accessor']) && isset($sort['by'])) {
-			$order = $sort['by'];
-
-			usort($data, function($a, $b) use ($accessor, $order) {
-				$value_a = null;
-				$value_b = null;
-				$nulls_last = false;
-
-				// Get values based on accessor
-				if ($accessor === 'score') {
-					$has_score_a = isset($a['score']['overall']);
-					$has_score_b = isset($b['score']['overall']);
-
-					// Posts without scores always go to the end
-					if (!$has_score_a && !$has_score_b) return 0;
-					if (!$has_score_a) return 1;
-					if (!$has_score_b) return -1;
-
-					$value_a = $a['score']['overall'];
-					$value_b = $b['score']['overall'];
-				} else if ($accessor === 'id') {
-					$value_a = $a['id'];
-					$value_b = $b['id'];
-				} else if ($accessor === 'title') {
-					$value_a = strtolower($a['title']);
-					$value_b = strtolower($b['title']);
-				} else if (in_array($accessor, ['impressions', 'clicks', 'position'], true)) {
-					$nulls_last = true;
-					$value_a = isset($a['gsc'][$accessor]) ? (float) $a['gsc'][$accessor] : null;
-					$value_b = isset($b['gsc'][$accessor]) ? (float) $b['gsc'][$accessor] : null;
-					// A zero position means "no ranking data", not "rank zero".
-					if ($accessor === 'position') {
-						if ($value_a !== null && $value_a <= 0) $value_a = null;
-						if ($value_b !== null && $value_b <= 0) $value_b = null;
-					}
-				} else if ($accessor === 'visitors') {
-					$value_a = isset($a['visitors_30d']) ? (int) $a['visitors_30d'] : 0;
-					$value_b = isset($b['visitors_30d']) ? (int) $b['visitors_30d'] : 0;
-				} else if ($accessor === 'aibots') {
-					$value_a = isset($a['ai_bots_total']) ? (int) $a['ai_bots_total'] : 0;
-					$value_b = isset($b['ai_bots_total']) ? (int) $b['ai_bots_total'] : 0;
-				}
-
-				// Posts without data always go to the end, whatever the direction.
-				if ($nulls_last) {
-					if ($value_a === null && $value_b === null) return 0;
-					if ($value_a === null) return 1;
-					if ($value_b === null) return -1;
-				}
-
-				// Compare values
-				if ($value_a === $value_b) {
-					return 0;
-				}
-
-				if ($order === 'asc') {
-					return ($value_a < $value_b) ? -1 : 1;
-				} else {
-					return ($value_a > $value_b) ? -1 : 1;
-				}
-			});
-		}
-
 		// The real result count after every filter (status, search, opportunity views), so the
 		// pagination reflects what the user is actually looking at, not the whole library.
-		$total_counts['results'] = count( $data );
+		$total_counts['results'] = count( $filtered_ids );
 
-		$paginated_data = array_slice($data, $offset, $limit);
+		$page_ids = array_slice( $filtered_ids, $offset, $limit );
+
+		// ---- Pass 3: hydrate the visible page only ----
+		$data = [];
+		if ( !empty( $page_ids ) ) {
+			_prime_post_caches( $page_ids, false, true );
+
+			foreach ( $page_ids as $pid ) {
+				$post = get_post( $pid );
+				if ( !$post ) continue;
+
+				// Migrate old meta keys to new ones (runs once per post)
+				$this->core->migrate_post_meta_keys( $post->ID );
+
+				$score_data = get_post_meta( $post->ID, '_mwseo_analysis', true );
+				$has_score = !empty( $score_data );
+
+				$gsc_row = isset( $gsc_map[ $post->ID ] ) ? $gsc_map[ $post->ID ] : null;
+				$no_index = isset( $excluded_lookup[ $post->ID ] );
+
+				$ignored_tests = get_post_meta($post->ID, '_mwseo_ignored_tests', true);
+				$magic_fixes_applied = get_post_meta($post->ID, '_mwseo_issues_fixed', true);
+				// Get AI agents data for this post
+				$ai_agents_data = $this->core->get_ai_agents_by_post($post->ID, 30);
+
+				// TODO: meta_key_seo_title and meta_key_seo_excerpt should migrate to _mwseo_title and _mwseo_excerpt
+				$row = [
+					'id' => $post->ID,
+					'title' => $post->post_title,
+					'excerpt' => $post->post_excerpt,
+					'slug' => $post->post_name,
+					'permalink' => get_permalink($post->ID),
+					'status' => $this->core->get_seo_engine_post_meta($post),
+					'publish_date' => $post->post_date,
+					'featured_image' => get_the_post_thumbnail_url($post->ID, 'medium'),
+					'seo_title' => get_post_meta($post->ID, $this->core->meta_key_seo_title, true),
+					'seo_excerpt' => get_post_meta($post->ID, $this->core->meta_key_seo_excerpt, true),
+					'rendered_title' => $this->core->build_title($post),
+					'rendered_excerpt' => $this->core->build_excerpt($post),
+					'post_type' => $post->post_type,
+					'post_status' => $post->post_status,
+					'author_name' => get_the_author_meta('display_name', $post->post_author),
+					'edit_url' => get_edit_post_link($post->ID, 'raw'),
+					'can_edit' => current_user_can('edit_post', $post->ID),
+					'can_delete' => current_user_can('delete_post', $post->ID),
+					'language' => $this->core->get_post_language_slug( $post->ID ),
+					'score' => $has_score ? $score_data : null,
+					'ignored_tests' => is_array($ignored_tests) ? $ignored_tests : [],
+					'fixed' => is_array($magic_fixes_applied) ? $magic_fixes_applied : [],
+					'ai_agents' => $ai_agents_data,
+					'ai_bots_total' => is_array( $ai_agents_data['grouped'] ?? null ) ? array_sum( $ai_agents_data['grouped'] ) : 0,
+					'gsc' => $gsc_row,
+					'no_index' => $no_index,
+					'canonical_url' => get_post_meta($post->ID, '_mwseo_canonical', true),
+				];
+				if ( $accessor === 'visitors' ) {
+					$row['visitors_30d'] = isset( $visitor_totals[ $post->ID ] ) ? (int) $visitor_totals[ $post->ID ] : 0;
+				}
+				$data[] = $row;
+			}
+		}
 
 		return new WP_REST_Response([
 			'success' => true,
-			'posts' => $paginated_data,
+			'posts' => $data,
 			'total' => $total_counts,
 		], 200);
 	}

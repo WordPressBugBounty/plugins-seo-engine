@@ -671,7 +671,19 @@ class Meow_MWSEO_Modules_Analytics
 		$method = $this->core->get_option( 'analytics_method', 'private' );
 
 		if ( $method === 'google' ) {
-			$rows = $this->core->get_google_analytics_pages_daily( $start, $end );
+			// Scope the GA report to just these posts' paths (both slash variants, GA matches
+			// pagePath literally). The unscoped site-wide page-day report is memory-dangerous
+			// on 128M hosts; the callers only ever chart the visible rows anyway.
+			$ga_paths = array();
+			foreach ( $post_ids as $pid ) {
+				$p = parse_url( get_permalink( $pid ), PHP_URL_PATH );
+				if ( !$p ) continue;
+				$no_slash = rtrim( $p, '/' );
+				if ( $no_slash === '' ) $no_slash = '/';
+				$ga_paths[] = $no_slash;
+				if ( $no_slash !== '/' ) $ga_paths[] = $no_slash . '/';
+			}
+			$rows = $this->core->get_google_analytics_pages_daily( $start, $end, $ga_paths );
 			if ( !empty( $rows ) ) {
 				// Map each requested post's permalink (host + normalized path) to its id; the GA4 rows
 				// carry hostName + pagePath, so multi-domain (Polylang) posts resolve correctly.
@@ -721,10 +733,43 @@ class Meow_MWSEO_Modules_Analytics
 	}
 
 	// Visitor totals per post over the window, for sorting the posts list by traffic.
-	// Sums the same daily series the row chart shows, so the sorted order always matches
-	// the numbers the user is looking at.
 	public function get_posts_visitor_totals( $post_ids, $days = 30 )
 	{
+		$post_ids = array_values( array_unique( array_filter( array_map( 'intval', (array) $post_ids ) ) ) );
+		if ( empty( $post_ids ) ) return array();
+
+		$method = $this->core->get_option( 'analytics_method', 'private' );
+
+		// google: one light host+path totals report (no date dimension, one row per page
+		// instead of one per page-day). This runs at the end of an already memory-heavy
+		// request over the WHOLE library, so it must never pull the page-day matrix in.
+		if ( $method === 'google' ) {
+			$days  = max( 7, min( 90, (int) $days ) );
+			$start = date( 'Y-m-d', strtotime( '-' . ( $days - 1 ) . ' days' ) );
+			$end   = date( 'Y-m-d' );
+			$rows  = $this->core->get_google_analytics_pages_totals( $start, $end );
+
+			$totals = array_fill_keys( $post_ids, 0 );
+			if ( empty( $rows ) ) return $totals;
+
+			$map = array();
+			foreach ( $post_ids as $pid ) {
+				$pl   = get_permalink( $pid );
+				$host = parse_url( $pl, PHP_URL_HOST );
+				$path = $this->normalize_visitor_path( parse_url( $pl, PHP_URL_PATH ) );
+				$map[ $host . '|' . $path ] = $pid;
+				if ( !isset( $map[ '*|' . $path ] ) ) $map[ '*|' . $path ] = $pid;
+			}
+			foreach ( $rows as $r ) {
+				$path = $this->normalize_visitor_path( $r['path'] );
+				$pid  = isset( $map[ $r['host'] . '|' . $path ] ) ? $map[ $r['host'] . '|' . $path ]
+					  : ( isset( $map[ '*|' . $path ] ) ? $map[ '*|' . $path ] : 0 );
+				if ( $pid ) $totals[ $pid ] += (int) $r['visitors'];
+			}
+			return $totals;
+		}
+
+		// Other sources: sum the same daily series the row chart shows.
 		$series = $this->get_posts_visitor_series( $post_ids, $days );
 		$totals = array();
 		foreach ( $series as $pid => $points ) {
@@ -1011,6 +1056,32 @@ class Meow_MWSEO_Modules_Analytics
 			'grouped' => $grouped,
 			'bots' => $results
 		);
+	}
+
+	// Batched total AI-bot hits per post over the window, for the posts-list sort:
+	// one GROUP BY query instead of one query per post in the library.
+	public function get_ai_bots_totals_by_posts( $post_ids, $days = 30 )
+	{
+		global $wpdb;
+
+		$post_ids = array_values( array_unique( array_filter( array_map( 'intval', (array) $post_ids ) ) ) );
+		if ( empty( $post_ids ) ) return array();
+
+		$start_date = date( 'Y-m-d', strtotime( "-{$days} days" ) );
+		$totals = array();
+		foreach ( array_chunk( $post_ids, 5000 ) as $chunk ) {
+			$in = implode( ',', $chunk );
+			$rows = $wpdb->get_results( $wpdb->prepare(
+				"SELECT post_id, COUNT(*) AS hits FROM $this->ai_agents_table
+				WHERE post_id IN ($in) AND visit_date >= %s
+				GROUP BY post_id",
+				$start_date
+			), ARRAY_A );
+			foreach ( (array) $rows as $r ) {
+				$totals[ (int) $r['post_id'] ] = (int) $r['hits'];
+			}
+		}
+		return $totals;
 	}
 
 	/**

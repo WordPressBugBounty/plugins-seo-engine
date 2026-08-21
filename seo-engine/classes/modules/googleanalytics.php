@@ -528,7 +528,7 @@ class Meow_MWSEO_Modules_GoogleAnalytics
 	 * Powers the per-post visitor sparklines in the Content SEO list without one API call per post.
 	 * Returns: [ ['date' => 'YYYY-MM-DD', 'host' => '...', 'path' => '/...', 'visitors' => int], ... ]
 	 */
-	public function get_pages_daily_visitors( $start_date = null, $end_date = null )
+	public function get_pages_daily_visitors( $start_date = null, $end_date = null, $paths = null )
 	{
 		if ( !$this->is_authenticated() ) {
 			return array();
@@ -536,14 +536,25 @@ class Meow_MWSEO_Modules_GoogleAnalytics
 		if ( !$start_date ) $start_date = date( 'Y-m-d', strtotime( '-30 days' ) );
 		if ( !$end_date )   $end_date   = date( 'Y-m-d' );
 
+		// Scope the report to the requested paths whenever the caller can name them (the
+		// sparklines only ever need the visible rows). The unscoped date x host x path
+		// report can reach 100k rows on a multi-domain site, and decoding that JSON
+		// exhausted PHP memory (fatal 500 that took the whole Content SEO list down).
+		$paths = is_array( $paths ) ? array_values( array_unique( array_filter( array_map( 'strval', $paths ) ) ) ) : null;
+		if ( $paths !== null && ( empty( $paths ) || count( $paths ) > 200 ) ) {
+			$paths = null;
+		}
+
 		// Honour the Display Cache setting: this is a heavy report pulled on every list load, so
 		// caching it (12h) spares the GA4 API and quota. Recommended on for API-based sources.
-		$transient_key = self::TRANSIENT_REPORT_PREFIX . 'pages_daily_' . $this->property_id . '_' . md5( $start_date . '|' . $end_date );
+		$transient_key = self::TRANSIENT_REPORT_PREFIX . 'pages_daily_' . $this->property_id . '_'
+			. md5( $start_date . '|' . $end_date . '|' . ( $paths ? implode( ',', $paths ) : 'all' ) );
 		if ( $this->use_cache ) {
 			$cached = get_transient( $transient_key );
 			if ( $cached !== false ) return $cached;
 		}
 
+		// Busiest page-days first, capped, so even the unscoped fallback stays bounded.
 		$request_data = array(
 			'dateRanges' => array( array( 'startDate' => $start_date, 'endDate' => $end_date ) ),
 			'dimensions' => array(
@@ -552,10 +563,26 @@ class Meow_MWSEO_Modules_GoogleAnalytics
 				array( 'name' => 'pagePath' )
 			),
 			'metrics'    => array( array( 'name' => 'totalUsers' ) ),
-			'limit'      => 100000
+			'orderBys'   => array( array( 'metric' => array( 'metricName' => 'totalUsers' ), 'desc' => true ) ),
+			'limit'      => 20000
 		);
+		if ( $paths ) {
+			$request_data['dimensionFilter'] = array(
+				'filter' => array(
+					'fieldName'    => 'pagePath',
+					'inListFilter' => array( 'values' => $paths, 'caseSensitive' => false )
+				)
+			);
+		}
 
-		$response = $this->make_google_analytics_request( 'runReport', $request_data );
+		// A GA4 hiccup (quota, transient API error) must degrade to "no data", not throw
+		// through the callers and kill whatever REST request needed these numbers.
+		try {
+			$response = $this->make_google_analytics_request( 'runReport', $request_data );
+		}
+		catch ( Exception $e ) {
+			return array();
+		}
 		if ( !$response || empty( $response['rows'] ) ) {
 			return array();
 		}
@@ -575,6 +602,63 @@ class Meow_MWSEO_Modules_GoogleAnalytics
 				'path'     => $path,
 				'visitors' => $visitors
 			);
+		}
+
+		if ( $this->use_cache ) {
+			set_transient( $transient_key, $out, 12 * HOUR_IN_SECONDS );
+		}
+		return $out;
+	}
+
+	/**
+	 * Total visitors per page over the window, in ONE report without the date dimension:
+	 * one row per host+path (a few thousand rows at most) instead of one per page-day.
+	 * This is what the posts-list "Visitors" sort uses; it has to stay light enough to
+	 * run at the end of an already memory-heavy request on 128M hosts.
+	 * Returns: [ ['host' => '...', 'path' => '/...', 'visitors' => int], ... ]
+	 */
+	public function get_pages_total_visitors( $start_date = null, $end_date = null )
+	{
+		if ( !$this->is_authenticated() ) {
+			return array();
+		}
+		if ( !$start_date ) $start_date = date( 'Y-m-d', strtotime( '-30 days' ) );
+		if ( !$end_date )   $end_date   = date( 'Y-m-d' );
+
+		$transient_key = self::TRANSIENT_REPORT_PREFIX . 'pages_totals_' . $this->property_id . '_' . md5( $start_date . '|' . $end_date );
+		if ( $this->use_cache ) {
+			$cached = get_transient( $transient_key );
+			if ( $cached !== false ) return $cached;
+		}
+
+		$request_data = array(
+			'dateRanges' => array( array( 'startDate' => $start_date, 'endDate' => $end_date ) ),
+			'dimensions' => array(
+				array( 'name' => 'hostName' ),
+				array( 'name' => 'pagePath' )
+			),
+			'metrics'    => array( array( 'name' => 'totalUsers' ) ),
+			'orderBys'   => array( array( 'metric' => array( 'metricName' => 'totalUsers' ), 'desc' => true ) ),
+			'limit'      => 20000
+		);
+
+		try {
+			$response = $this->make_google_analytics_request( 'runReport', $request_data );
+		}
+		catch ( Exception $e ) {
+			return array();
+		}
+		if ( !$response || empty( $response['rows'] ) ) {
+			return array();
+		}
+
+		$out = array();
+		foreach ( $response['rows'] as $row ) {
+			$host     = isset( $row['dimensionValues'][0]['value'] ) ? $row['dimensionValues'][0]['value'] : '';
+			$path     = isset( $row['dimensionValues'][1]['value'] ) ? $row['dimensionValues'][1]['value'] : '';
+			$visitors = isset( $row['metricValues'][0]['value'] ) ? (int) $row['metricValues'][0]['value'] : 0;
+			if ( $path === '' || $this->is_noise_host( $host ) ) continue;
+			$out[] = array( 'host' => $host, 'path' => $path, 'visitors' => $visitors );
 		}
 
 		if ( $this->use_cache ) {

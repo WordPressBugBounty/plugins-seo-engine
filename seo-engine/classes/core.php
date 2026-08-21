@@ -1233,7 +1233,9 @@ class Meow_MWSEO_Core
 			'analytics_privacy' => false,
 			
 			// Google Analytics
-			'google_analytics_cache' => true,
+			// The Settings toggle and the GA module both use 'analytics_cache'; this default
+			// was named 'google_analytics_cache' for a while, so caching silently never engaged.
+			'analytics_cache' => true,
 			'google_analytics' => false,
 			'google_analytics_property_ids' => [],
 			'google_analytics_property_id' => '',
@@ -1570,8 +1572,15 @@ class Meow_MWSEO_Core
 			$prompt .= "\n\nHere are the user provided details about the product: {PRODUCT}.";
 		}
 
-		if ( !empty( $params['instructions'] ) ) {
-			$prompt .= "\n\nHere are general instructions from the user: " . $params['instructions'];
+		// The custom instructions are persistent (Content SEO settings), so single-product
+		// generation gets them too. The bulk modal sends its own value to override them for
+		// that run (an explicit empty string means "none").
+		$instructions = isset( $params['instructions'] )
+			? trim( (string) $params['instructions'] )
+			: trim( (string) $this->get_option( 'woo_assistant_instructions', '' ) );
+
+		if ( !empty( $instructions ) ) {
+			$prompt .= "\n\nHere are general instructions from the user: " . $instructions;
 		}
 
 		$prompt .= "\n\nHere are the details extracted from the product data: " . json_encode( $product_data );
@@ -2461,6 +2470,13 @@ class Meow_MWSEO_Core
 		return $this->analytics_module->get_ai_agents_by_post( $post_id, $days );
 	}
 
+	function get_ai_bots_totals_by_posts( $post_ids, $days = 30 ) {
+		if ( !isset( $this->analytics_module ) ) {
+			return array();
+		}
+		return $this->analytics_module->get_ai_bots_totals_by_posts( $post_ids, $days );
+	}
+
 	function query_bot_traffic( $args = array() ) {
 		if ( !isset( $this->analytics_module ) ) {
 			return array();
@@ -2722,12 +2738,20 @@ class Meow_MWSEO_Core
 		return $this->analytics_module->get_posts_visitor_totals( $post_ids, $days );
 	}
 
-	function get_google_analytics_pages_daily( $start_date = null, $end_date = null ) {
+	function get_google_analytics_pages_daily( $start_date = null, $end_date = null, $paths = null ) {
 		if ( !isset( $this->googleanalytics_module ) ) {
 			return array();
 		}
 		$this->googleanalytics_module->init();
-		return $this->googleanalytics_module->get_pages_daily_visitors( $start_date, $end_date );
+		return $this->googleanalytics_module->get_pages_daily_visitors( $start_date, $end_date, $paths );
+	}
+
+	function get_google_analytics_pages_totals( $start_date = null, $end_date = null ) {
+		if ( !isset( $this->googleanalytics_module ) ) {
+			return array();
+		}
+		$this->googleanalytics_module->init();
+		return $this->googleanalytics_module->get_pages_total_visitors( $start_date, $end_date );
 	}
 
 	// TODO [2025]: Refactor to unified analytics provider interface
