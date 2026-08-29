@@ -6,6 +6,9 @@
  * Implements normalized 0-100 scoring with context-aware targets
  */
 class Meow_MWSEO_Score {
+	// Bumped whenever the score caches are cleared; see cache_version().
+	const CACHE_VERSION_OPTION = 'mwseo_score_cache_version';
+
 	private $core;
 	private $options;
 	private $ai_enabled = false;
@@ -246,6 +249,22 @@ class Meow_MWSEO_Score {
 	}
 
 	/**
+	 * Salt mixed into every score cache key. Clearing the cache bumps it, which makes
+	 * all existing keys unreachable at once. The delete pass in the REST handler only
+	 * sees transients stored in the options table, so on sites running an external
+	 * object cache (Redis, Memcached) this salt is what actually invalidates them.
+	 */
+	public static function cache_version() {
+		return (int) get_option( self::CACHE_VERSION_OPTION, 0 );
+	}
+
+	public static function bump_cache_version() {
+		$version = self::cache_version() + 1;
+		update_option( self::CACHE_VERSION_OPTION, $version, false );
+		return $version;
+	}
+
+	/**
 	 * AI analysis - semantic alignment, intent, summary, entities
 	 */
 	private function analyze_ai( $post, $analysis ) {
@@ -293,6 +312,8 @@ class Meow_MWSEO_Score {
 				'readability' => $check_readability,
 				'topic' => $check_topic,
 			],
+			// Bumped by Clear Score Cache, which retires every existing key at once.
+			'cache_version' => self::cache_version(),
 		];
 		$content_hash = md5( json_encode( $cache_key_data ) );
 		$cache_key = 'seo_engine_ai_' . $post->ID . '_' . $content_hash;
@@ -772,13 +793,19 @@ class Meow_MWSEO_Score {
 
 		try {
 			$title = $analysis['title'];
-			$content_sample = $this->truncate_at_sentence( $analysis['content'], 2000 );
+			$content_sample = $this->truncate_at_sentence( $analysis['content'], 6000 );
+			$this->core->log( "Analyzing topic completeness for '{$title}' with content sample length: " . mb_strlen( $content_sample ) );
 
 			if ( empty( $title ) || empty( $content_sample ) ) {
-				return ['score' => 100, 'feedback' => ''];
+				return ['score' => 'NA', 'feedback' => ''];
 			}
 
-			$prompt = "Topic coverage for '{$title}'. Score 0-100. If < 80, list 2 missing topics max. Very brief.\n\nContent:\n{$content_sample}\n\nJSON: {\"score\": X, \"feedback\": \"...\"}";
+			// The sample is capped, so say so: otherwise the model reads a partial post
+			// and reports the sections it never saw as missing.
+			$truncated = mb_strlen( $analysis['content'], 'UTF-8' ) > mb_strlen( $content_sample, 'UTF-8' );
+			$note = $truncated ? " Only the beginning of the post is shown, so never assume a later section is absent." : "";
+
+			$prompt = "Judge whether this post covers what a reader searching for '{$title}' would expect. Score 0-100.{$note} Be generous: a post that delivers on its title is 85 or higher. Go below 80 only if an essential subtopic is genuinely absent, not merely short. If coverage is fine, return an empty feedback string - do not invent gaps. Otherwise name at most 2 truly missing subtopics in one short sentence.\n\nContent:\n{$content_sample}\n\nJSON: {\"score\": X, \"feedback\": \"...\"}";
 
 			$response = $mwai->simpleTextQuery( $prompt, [ 'scope' => 'seo' ] );
 			$response = trim( $response );
@@ -1443,7 +1470,8 @@ class Meow_MWSEO_Score {
 			return 'NA';
 		}
 
-		$cache_key = 'mwseo_js_render_' . $post->ID . '_' . md5( $post->post_modified . $post->post_content );
+		$cache_key = 'mwseo_js_render_' . $post->ID . '_'
+			. md5( self::cache_version() . '|' . $post->post_modified . $post->post_content );
 		$cached = get_transient( $cache_key );
 		if ( $cached === 'pass' ) return 100;
 		if ( $cached === 'fail' ) return 0;

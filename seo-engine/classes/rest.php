@@ -2516,6 +2516,40 @@ class Meow_MWSEO_Rest
 		}
 	}
 
+	/**
+	 * Transient prefixes holding score data. The AI analysis of a post is cached for a
+	 * week under seo_engine_ai_*, the JS-rendering probe for a day under mwseo_js_render_*,
+	 * and image vision results for a week under mwseo_vision_*.
+	 */
+	private static $score_transient_prefixes = [ 'seo_engine_ai_', 'mwseo_js_render_', 'mwseo_vision_' ];
+
+	/**
+	 * Delete every transient whose name starts with one of the given prefixes.
+	 * Only transients stored in the options table can be enumerated this way, which is
+	 * why callers also bump the score cache version — that covers external object caches.
+	 */
+	private function delete_transients_by_prefix( $prefixes ) {
+		global $wpdb;
+		$deleted = 0;
+
+		foreach ( $prefixes as $prefix ) {
+			$names = $wpdb->get_col( $wpdb->prepare(
+				"SELECT option_name FROM {$wpdb->options} WHERE option_name LIKE %s",
+				$wpdb->esc_like( '_transient_' . $prefix ) . '%'
+			) );
+
+			foreach ( $names as $name ) {
+				// Go through delete_transient() rather than deleting the rows directly, so
+				// the timeout row and any object cache entry go with it.
+				if ( delete_transient( substr( $name, strlen( '_transient_' ) ) ) ) {
+					$deleted++;
+				}
+			}
+		}
+
+		return $deleted;
+	}
+
 	function rest_clear_ai_cache( $request ) {
 		try {
 			global $wpdb;
@@ -2542,11 +2576,19 @@ class Meow_MWSEO_Rest
 				}
 			}
 
+			// Stored analysis is only half of it: the AI results also sit in transients,
+			// keyed by a hash of the content. Without this, a re-analysis of unchanged
+			// content would come straight back out of the cache.
+			$transients_count = $this->delete_transients_by_prefix( self::$score_transient_prefixes );
+			Meow_MWSEO_Score::bump_cache_version();
+
+			$message = ( $cleared_count > 0 || $transients_count > 0 )
+				? "Score cache cleared ($cleared_count post(s), $transients_count cached result(s))."
+				: "No score cache found to clear.";
+
 			return $this->success_response(
-				[ 'cleared_count' => $cleared_count ],
-				$cleared_count > 0
-					? "AI cache cleared for $cleared_count post(s)."
-					: "No AI cache found to clear."
+				[ 'cleared_count' => $cleared_count, 'transients_count' => $transients_count ],
+				$message
 			);
 
 		} catch ( Exception $e ) {
@@ -4009,7 +4051,10 @@ class Meow_MWSEO_Rest
 			$wpdb->query( "TRUNCATE TABLE {$analytics_table}" );
 			$wpdb->query( "TRUNCATE TABLE {$ai_agents_table}" );
 
-			// Clear any cached data
+			// Clear any cached data. wp_cache_flush() misses transients kept in the options
+			// table, so the score caches have to be removed explicitly.
+			$this->delete_transients_by_prefix( self::$score_transient_prefixes );
+			Meow_MWSEO_Score::bump_cache_version();
 			wp_cache_flush();
 
 			return $this->success_response( null, 'All SEO Engine data has been reset successfully.' );
