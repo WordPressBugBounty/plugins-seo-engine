@@ -8,6 +8,7 @@ class Meow_MWSEO_Modules_PlausibleAnalytics
 	private $server_url = null;
 	private $site_id = null;
 	private $use_cache = false;
+	private $disabled_tracking = false;
 
 	const TRANSIENT_REPORT_PREFIX = 'mwseo_plausible_analytics_report_';
 
@@ -15,6 +16,7 @@ class Meow_MWSEO_Modules_PlausibleAnalytics
 	{
 		$this->core = $core;
 		$this->init();
+		$this->tracking();
 	}
 
 	/**
@@ -25,7 +27,7 @@ class Meow_MWSEO_Modules_PlausibleAnalytics
 		$this->api_key = $this->core->get_option( 'plausible_api_key', '' );
 		$this->server_url = $this->core->get_option( 'plausible_server_url', 'https://plausible.io' );
 		$this->site_id = $this->core->get_option( 'plausible_site_id', '' );
-		$this->use_cache = $this->core->get_option( 'plausible_analytics_cache', false );
+		$this->use_cache = $this->core->get_option( 'analytics_cache', false );
 
 		// Remove trailing slash from server URL
 		$this->server_url = rtrim( $this->server_url, '/' );
@@ -33,6 +35,56 @@ class Meow_MWSEO_Modules_PlausibleAnalytics
 		if ( empty( $this->api_key ) || empty( $this->site_id ) ) {
 			return;
 		}
+	}
+
+	/**
+	 * Initialize tracking script injection.
+	 */
+	public function tracking() {
+
+		if ( is_admin() ) { return; }
+
+		$this->disabled_tracking = $this->core->get_option( 'plausible_analytics_tracking_disabled', false );
+
+		if ( $this->disabled_tracking || empty( $this->site_id ) ) {
+			return;
+		}
+
+		add_action( 'wp_enqueue_scripts', array( $this, 'wp_enqueue_tracking_scripts' ) );
+	}
+
+	public function wp_enqueue_tracking_scripts() {
+
+		// Don't track logged-in users
+		$is_logged_in = is_user_logged_in();
+		if ( $is_logged_in ) {
+			$track_logged_users = $this->core->get_option( 'plausible_track_logged_users', false );
+			if ( !$track_logged_users ) { return; }
+
+			// Don't track editors and admins
+			$is_power_user = current_user_can( 'editor' ) || current_user_can( 'administrator' );
+			if ( $is_power_user ) {
+				$track_power_users = $this->core->get_option( 'plausible_track_power_users', false );
+				if ( !$track_power_users ) { return; }
+			}
+		}
+
+		add_filter( 'script_loader_tag', array( $this, 'script_loader_tag' ), 10, 2 );
+
+		// Enqueue the Plausible Analytics script
+		$script_url = $this->server_url . '/js/script.js';
+		wp_register_script( 'mwseo-analytics-plausible', $script_url, array(), null, true );
+		wp_enqueue_script( 'mwseo-analytics-plausible' );
+	}
+
+	function script_loader_tag($tag, $handle)
+	{
+		if ($handle === 'mwseo-analytics-plausible') {
+			// Add defer and data-domain attributes to Plausible script
+			$tag = str_replace('<script src=', '<script defer data-domain="' . esc_attr( $this->site_id ) . '" src=', $tag);
+			return $tag;
+		}
+		return $tag;
 	}
 
 	/**

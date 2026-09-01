@@ -568,26 +568,6 @@ class Meow_MWSEO_Rest
 
 			#endregion
 
-			#region REST Plausible Analytics
-			register_rest_route( $this->namespace, '/plausible-analytics/data', array(
-				'methods' => 'POST',
-				'permission_callback' => array( $this->core, 'can_access_settings' ),
-				'callback' => array( $this, 'rest_get_plausible_analytics_data' )
-			) );
-			register_rest_route( $this->namespace, '/plausible-analytics/summary', array(
-				'methods' => 'POST',
-				'permission_callback' => array( $this->core, 'can_access_settings' ),
-				'callback' => array( $this, 'rest_get_plausible_analytics_summary' )
-			) );
-			register_rest_route( $this->namespace, '/plausible-analytics/top_posts', array(
-				'methods' => 'POST',
-				'permission_callback' => array( $this->core, 'can_access_settings' ),
-				'callback' => array( $this, 'rest_get_plausible_analytics_top_posts' )
-			) );
-
-			#endregion
-
-
 			#region REST Sitemap
 			register_rest_route( $this->namespace, '/sitemap/generate', array(
 				'methods' => 'GET',
@@ -3959,80 +3939,6 @@ class Meow_MWSEO_Rest
 				'success' => true,
 				'data' => array()
 			], 200 );
-		}
-	}
-
-	// Plausible Analytics
-
-	// TODO [2025]: Refactor to unified analytics provider interface
-	function rest_get_plausible_analytics_data( $request ) {
-		try {
-			$params = $request->get_json_params();
-			$args = array(
-				'start_date' => isset( $params['start_date'] ) ? $params['start_date'] : null,
-				'end_date' => isset( $params['end_date'] ) ? $params['end_date'] : null,
-				'group_by' => isset( $params['group_by'] ) ? $params['group_by'] : 'day',
-				'limit' => isset( $params['limit'] ) ? intval( $params['limit'] ) : 100
-			);
-			$data = $this->core->get_plausible_analytics_data( $args );
-
-			return new WP_REST_Response( [
-				'success' => true,
-				'data' => $data
-			], 200 );
-
-		} catch ( Exception $e ) {
-			return new WP_REST_Response( [
-				'success' => false,
-				'message' => $e->getMessage()
-			], 500 );
-		}
-	}
-
-	// TODO [2025]: Refactor to unified analytics provider interface
-	function rest_get_plausible_analytics_summary( $request ) {
-		try {
-			$params = $request->get_json_params();
-
-			$start_date = isset( $params['start_date'] ) ? $params['start_date'] : null;
-			$end_date = isset( $params['end_date'] ) ? $params['end_date'] : null;
-
-			$data = $this->core->get_plausible_analytics_summary( $start_date, $end_date );
-
-			return new WP_REST_Response( [
-				'success' => true,
-				'data' => $data
-			], 200 );
-
-		} catch ( Exception $e ) {
-			return new WP_REST_Response( [
-				'success' => false,
-				'message' => $e->getMessage()
-			], 500 );
-		}
-	}
-
-	// TODO [2025]: Refactor to unified analytics provider interface
-	function rest_get_plausible_analytics_top_posts( $request ) {
-		try {
-			$params = $request->get_json_params();
-
-			$start_date = isset( $params['start_date'] ) ? $params['start_date'] : null;
-			$end_date = isset( $params['end_date'] ) ? $params['end_date'] : null;
-			$limit = isset( $params['limit'] ) ? intval( $params['limit'] ) : 10;
-
-			$data = $this->core->get_plausible_analytics_top_posts( $start_date, $end_date, $limit );
-
-			return new WP_REST_Response( [
-				'success' => true,
-				'data' => $data
-			], 200 );
-
-		} catch ( Exception $e ) {
-			return new WP_REST_Response( [
-				'success' => false,
-				'message' => $e->getMessage()
-			], 500 );
 		}
 	}
 

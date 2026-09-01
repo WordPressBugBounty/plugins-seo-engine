@@ -4,7 +4,7 @@ Tags: seo, redirection, sitemap, schema, analytics
 Donate link: https://www.patreon.com/meowapps
 Requires at least: 6.0
 Tested up to: 7.1
-Stable tag: 0.9.1
+Stable tag: 0.9.2
 Requires PHP: 8.1
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
@@ -40,7 +40,7 @@ A clean redirect manager paired with a 404 monitor. Spot broken links, convert a
 Full MCP support means your entire site's SEO data is queryable via ChatGPT or Claude. Ask anything, get insights, automate workflows. That's all in the free version.
 
 🎯 **Analytics & Tracking**
-Connect to Google Analytics, Plausible Analytics, or use built-in privacy-friendly tracking. Monitor AI bot visits, Core Web Vitals, and performance, all in one place.
+Connect to Google Analytics, Plausible, Matomo, or use the built-in privacy-friendly tracking. All four are free. Monitor AI bot visits, Core Web Vitals, and performance, all in one place.
 
 == 🏝️ Content SEO ==
 
@@ -186,9 +186,12 @@ Understand your traffic, monitor performance, all from your WordPress dashboard.
 **Multiple Data Sources:**
 
 * Google Analytics: Connect directly via Google Cloud
-* Plausible Analytics: Privacy-friendly alternative
+* Plausible Analytics: Privacy-friendly, cloud or self-hosted
+* Matomo Analytics: Privacy-friendly, cloud or self-hosted
 * Private Analytics: Built-in tracking with full data ownership
-* Switch between sources or... combine them!
+* All four are in the free version. Switch between sources or... combine them!
+
+SEO Engine can inject the tracking code for you, or simply read the data if you already track visitors another way.
 
 **What You Can Track:**
 
@@ -214,7 +217,6 @@ Referral spam and junk analytics rows are filtered out automatically, so the num
 * Search Console Insights (per-post search data, quick wins, opportunity views)
 * Content Intelligence (AI checks for originality, completeness, readability)
 * WooCommerce AI
-* Advanced Analytics
 * Priority Support
 
 == Why SEO Engine? ==
@@ -226,7 +228,7 @@ Built from the ground up with modern code. No legacy bloat, no unnecessary featu
 Smart suggestions that actually help. Not "AI" slapped on as marketing, genuinely useful automation.
 
 **Privacy-Friendly**
-Choose between Google Analytics, Plausible, or fully private tracking. You control your data.
+Choose between Google Analytics, Plausible, Matomo, or fully private tracking. You control your data.
 
 **Developer Friendly**
 Clean APIs, WordPress hooks. Extend it your way.
@@ -261,9 +263,10 @@ No. SEO Engine works great standalone. AI Engine unlocks Magic Fix, content gene
 
 * **Google Analytics**: If you're already using it and want detailed insights
 * **Plausible**: If you want privacy-friendly analytics with a clean interface
+* **Matomo**: If you want privacy-friendly analytics you host and own yourself
 * **Private Analytics**: If you want full data ownership and simplicity
 
-You can switch between them or compare data from multiple sources.
+All four are free. You can switch between them or compare data from multiple sources.
 
 = Does this work with WooCommerce? =
 
@@ -294,6 +297,11 @@ No. The Redirections & 404 module handles URL redirects (301, 302, 307, 308, 410
 Yes, and it is fully automatic. When you publish or update a post, SEO Engine instantly notifies Bing, Yandex, Naver and every IndexNow-compatible engine, so your content gets crawled right away instead of waiting. The verification key is generated and served for you; there is nothing to configure. Note that Google does not use IndexNow and keeps reading your sitemap instead.
 
 == Changelog ==
+
+= 0.9.2 (2026/09/01) =
+* Add: Matomo Analytics support for both cloud and self-hosted setups.
+* Update: All analytics sources now use the same endpoints.
+* Fix: Plausible Analytics not working in the free version.
 
 = 0.9.1 (2026/08/29) =
 * Add: AI cache reset in Maintenance settings.

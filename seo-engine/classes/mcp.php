@@ -350,7 +350,7 @@ class Meow_MWSEO_MCP {
     // Analytics Operations (Source-Agnostic)
     $tools[] = [
       'name' => 'mwseo_get_analytics_data',
-      'description' => 'Get analytics data from the currently configured source (Google Analytics, Plausible Analytics, or Private Analytics). Specify metric="summary" for traffic overview (visitors, pageviews, sessions, bounce rate) or metric="top_posts" for most visited content. Supports date range filtering and country filtering. Defaults to current month if dates omitted. Examples: (1) Get current month summary: metric="summary". (2) Get January top posts: metric="top_posts", start_date="2024-01-01", end_date="2024-01-31". (3) Get US traffic only: metric="top_posts", country="US". Respects the Display Source setting in the dashboard.',
+      'description' => 'Get analytics data from the currently configured source (Google Analytics, Plausible Analytics, Matomo Analytics, or Private Analytics). Specify metric="summary" for traffic overview (visitors, pageviews, sessions, bounce rate) or metric="top_posts" for most visited content. Supports date range filtering and country filtering. Defaults to current month if dates omitted. Examples: (1) Get current month summary: metric="summary". (2) Get January top posts: metric="top_posts", start_date="2024-01-01", end_date="2024-01-31". (3) Get US traffic only: metric="top_posts", country="US". Respects the Display Source setting in the dashboard.',
       'category' => 'SEO Engine',
       'accessLevel' => 'read',
       'inputSchema' => [

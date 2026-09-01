@@ -525,8 +525,6 @@ class Meow_MWSEO_Modules_Analytics
 	// TODO [2025]: Refactor to unified analytics provider interface
 	public function get_analytics_data( $args = array() )
 	{
-		global $wpdb;
-
 		$defaults = array(
 			'post_id' => null,
 			'start_date' => null,
@@ -536,6 +534,35 @@ class Meow_MWSEO_Modules_Analytics
 		);
 
 		$args = wp_parse_args( $args, $defaults );
+
+		// A per-post series can only come from our own table, since the remote providers
+		// are queried by path, not by post ID. Site-wide series follow the Display Source.
+		if ( !empty( $args['post_id'] ) ) {
+			return $this->get_private_analytics_data( $args );
+		}
+
+		switch ( $this->core->get_option( 'analytics_method', 'private' ) ) {
+			case 'google':
+				return $this->core->get_google_analytics_data( $args );
+
+			case 'plausible':
+				return $this->core->get_plausible_analytics_data( $args );
+
+			case 'matomo':
+				return $this->core->get_matomo_analytics_data( $args );
+
+			case 'none':
+				return array();
+
+			case 'private':
+			default:
+				return $this->get_private_analytics_data( $args );
+		}
+	}
+
+	private function get_private_analytics_data( $args )
+	{
+		global $wpdb;
 
 		// So we can construct the WHERE clause dynamically
 		$where_conditions = array( $this->spam_referer_sql() );
@@ -605,6 +632,9 @@ class Meow_MWSEO_Modules_Analytics
 			case 'plausible':
 				return $this->core->get_plausible_analytics_post_analytics( $page_path, $start_date, $end_date );
 
+			case 'matomo':
+				return $this->core->get_matomo_analytics_post_analytics( $page_path, $start_date, $end_date );
+
 			case 'none':
 				return array();
 
@@ -670,35 +700,18 @@ class Meow_MWSEO_Modules_Analytics
 
 		$method = $this->core->get_option( 'analytics_method', 'private' );
 
-		if ( $method === 'google' ) {
-			// Scope the GA report to just these posts' paths (both slash variants, GA matches
-			// pagePath literally). The unscoped site-wide page-day report is memory-dangerous
-			// on 128M hosts; the callers only ever chart the visible rows anyway.
-			$ga_paths = array();
-			foreach ( $post_ids as $pid ) {
-				$p = parse_url( get_permalink( $pid ), PHP_URL_PATH );
-				if ( !$p ) continue;
-				$no_slash = rtrim( $p, '/' );
-				if ( $no_slash === '' ) $no_slash = '/';
-				$ga_paths[] = $no_slash;
-				if ( $no_slash !== '/' ) $ga_paths[] = $no_slash . '/';
-			}
-			$rows = $this->core->get_google_analytics_pages_daily( $start, $end, $ga_paths );
+		if ( $method === 'google' || $method === 'matomo' ) {
+			// Scope the report to just these posts' paths. The unscoped site-wide page-day
+			// report is memory-dangerous on 128M hosts; the callers only ever chart the
+			// visible rows anyway.
+			$paths = $this->build_provider_paths( $post_ids );
+			$rows = $method === 'google'
+				? $this->core->get_google_analytics_pages_daily( $start, $end, $paths )
+				: $this->core->get_matomo_analytics_pages_daily( $start, $end, $paths );
 			if ( !empty( $rows ) ) {
-				// Map each requested post's permalink (host + normalized path) to its id; the GA4 rows
-				// carry hostName + pagePath, so multi-domain (Polylang) posts resolve correctly.
-				$map = array();
-				foreach ( $post_ids as $pid ) {
-					$pl   = get_permalink( $pid );
-					$host = parse_url( $pl, PHP_URL_HOST );
-					$path = $this->normalize_visitor_path( parse_url( $pl, PHP_URL_PATH ) );
-					$map[ $host . '|' . $path ] = $pid;
-					if ( !isset( $map[ '*|' . $path ] ) ) $map[ '*|' . $path ] = $pid; // host-agnostic fallback
-				}
+				$map = $this->build_post_path_map( $post_ids );
 				foreach ( $rows as $r ) {
-					$path = $this->normalize_visitor_path( $r['path'] );
-					$pid  = isset( $map[ $r['host'] . '|' . $path ] ) ? $map[ $r['host'] . '|' . $path ]
-						  : ( isset( $map[ '*|' . $path ] ) ? $map[ '*|' . $path ] : 0 );
+					$pid = $this->resolve_post_id_from_row( $map, $r['host'], $r['path'] );
 					if ( $pid && isset( $series[ $pid ][ $r['date'] ] ) ) {
 						$series[ $pid ][ $r['date'] ] += (int) $r['visitors'];
 					}
@@ -721,6 +734,7 @@ class Meow_MWSEO_Modules_Analytics
 			}
 		}
 		// plausible / none: no batched daily series available -> zero-filled (chart degrades to flat).
+		// Matomo is handled above: unlike Plausible it exposes a real per-day page report.
 
 		$out = array();
 		foreach ( $series as $pid => $by_date ) {
@@ -740,30 +754,23 @@ class Meow_MWSEO_Modules_Analytics
 
 		$method = $this->core->get_option( 'analytics_method', 'private' );
 
-		// google: one light host+path totals report (no date dimension, one row per page
+		// google / matomo: one light host+path totals report (no date dimension, one row per page
 		// instead of one per page-day). This runs at the end of an already memory-heavy
 		// request over the WHOLE library, so it must never pull the page-day matrix in.
-		if ( $method === 'google' ) {
+		if ( $method === 'google' || $method === 'matomo' ) {
 			$days  = max( 7, min( 90, (int) $days ) );
 			$start = date( 'Y-m-d', strtotime( '-' . ( $days - 1 ) . ' days' ) );
 			$end   = date( 'Y-m-d' );
-			$rows  = $this->core->get_google_analytics_pages_totals( $start, $end );
+			$rows  = $method === 'google'
+				? $this->core->get_google_analytics_pages_totals( $start, $end )
+				: $this->core->get_matomo_analytics_pages_totals( $start, $end );
 
 			$totals = array_fill_keys( $post_ids, 0 );
 			if ( empty( $rows ) ) return $totals;
 
-			$map = array();
-			foreach ( $post_ids as $pid ) {
-				$pl   = get_permalink( $pid );
-				$host = parse_url( $pl, PHP_URL_HOST );
-				$path = $this->normalize_visitor_path( parse_url( $pl, PHP_URL_PATH ) );
-				$map[ $host . '|' . $path ] = $pid;
-				if ( !isset( $map[ '*|' . $path ] ) ) $map[ '*|' . $path ] = $pid;
-			}
+			$map = $this->build_post_path_map( $post_ids );
 			foreach ( $rows as $r ) {
-				$path = $this->normalize_visitor_path( $r['path'] );
-				$pid  = isset( $map[ $r['host'] . '|' . $path ] ) ? $map[ $r['host'] . '|' . $path ]
-					  : ( isset( $map[ '*|' . $path ] ) ? $map[ '*|' . $path ] : 0 );
+				$pid = $this->resolve_post_id_from_row( $map, $r['host'], $r['path'] );
 				if ( $pid ) $totals[ $pid ] += (int) $r['visitors'];
 			}
 			return $totals;
@@ -786,6 +793,43 @@ class Meow_MWSEO_Modules_Analytics
 		$q = strpos( $path, '?' );
 		if ( $q !== false ) $path = substr( $path, 0, $q );
 		return strtolower( '/' . trim( $path, '/' ) );
+	}
+
+	// Build [ "host|path" => post_id ], plus a host-agnostic "*|path" fallback. Provider rows
+	// carry host + path, so multi-domain (Polylang/WPML) posts still resolve to the right id.
+	private function build_post_path_map( $post_ids )
+	{
+		$map = array();
+		foreach ( $post_ids as $pid ) {
+			$pl   = get_permalink( $pid );
+			$host = parse_url( $pl, PHP_URL_HOST );
+			$path = $this->normalize_visitor_path( parse_url( $pl, PHP_URL_PATH ) );
+			$map[ $host . '|' . $path ] = $pid;
+			if ( !isset( $map[ '*|' . $path ] ) ) $map[ '*|' . $path ] = $pid;
+		}
+		return $map;
+	}
+
+	private function resolve_post_id_from_row( $map, $host, $path )
+	{
+		$path = $this->normalize_visitor_path( $path );
+		if ( isset( $map[ $host . '|' . $path ] ) ) return $map[ $host . '|' . $path ];
+		return isset( $map[ '*|' . $path ] ) ? $map[ '*|' . $path ] : 0;
+	}
+
+	// Both slash variants: GA and Matomo match the page path literally.
+	private function build_provider_paths( $post_ids )
+	{
+		$paths = array();
+		foreach ( $post_ids as $pid ) {
+			$p = parse_url( get_permalink( $pid ), PHP_URL_PATH );
+			if ( !$p ) continue;
+			$no_slash = rtrim( $p, '/' );
+			if ( $no_slash === '' ) $no_slash = '/';
+			$paths[] = $no_slash;
+			if ( $no_slash !== '/' ) $paths[] = $no_slash . '/';
+		}
+		return $paths;
 	}
 
 	public function get_top_posts( $args = array() )
@@ -811,6 +855,9 @@ class Meow_MWSEO_Modules_Analytics
 					$args['end_date'],
 					$args['limit']
 				);
+
+			case 'matomo':
+				return $this->core->get_matomo_analytics_top_posts( $args );
 
 			case 'none':
 				return array();
@@ -870,6 +917,9 @@ class Meow_MWSEO_Modules_Analytics
 
 			case 'plausible':
 				return $this->core->get_plausible_analytics_summary( $start_date, $end_date );
+
+			case 'matomo':
+				return $this->core->get_matomo_analytics_summary( $start_date, $end_date );
 
 			case 'none':
 				return array();

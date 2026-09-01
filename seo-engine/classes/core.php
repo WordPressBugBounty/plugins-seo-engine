@@ -23,6 +23,8 @@ class Meow_MWSEO_Core
 	private $insights_module = null;
 	private $analytics_module = null;
 	private $googleanalytics_module = null;
+	private $plausibleanalytics_module = null;
+	private $matomoanalytics_module = null;
 	private $parsers = null;
 	public $redirects_module = null;
 	public $indexnow_module = null;
@@ -136,6 +138,16 @@ class Meow_MWSEO_Core
 		// Google Analytics
 		if ( class_exists( 'Meow_MWSEO_Modules_GoogleAnalytics' ) ) {
 			$this->googleanalytics_module = new Meow_MWSEO_Modules_GoogleAnalytics( $this );
+		}
+
+		// Plausible Analytics
+		if ( class_exists( 'Meow_MWSEO_Modules_PlausibleAnalytics' ) ) {
+			$this->plausibleanalytics_module = new Meow_MWSEO_Modules_PlausibleAnalytics( $this );
+		}
+
+		// Matomo Analytics
+		if ( class_exists( 'Meow_MWSEO_Modules_MatomoAnalytics' ) ) {
+			$this->matomoanalytics_module = new Meow_MWSEO_Modules_MatomoAnalytics( $this );
 		}
 
 		// Redirects + 404 monitor
@@ -1220,7 +1232,7 @@ class Meow_MWSEO_Core
 			'google_api_key' => '',
 
 			// Analytics Configuration
-			'analytics_method' => 'none', // 'none', 'private', 'google'
+			'analytics_method' => 'none', // 'none', 'private', 'google', 'plausible', 'matomo'
 			
 			// Analytics Options
 			'bots_track' => true,
@@ -1245,6 +1257,24 @@ class Meow_MWSEO_Core
 			'google_analytics_track_logged_users' => false,
 			'google_analytics_track_power_users' => false,
 			'google_analytics_tracking_disabled' => false,
+
+			// Plausible Analytics
+			'plausible_analytics' => false,
+			'plausible_site_id' => '',
+			'plausible_api_key' => '',
+			'plausible_server_url' => 'https://plausible.io',
+			'plausible_track_logged_users' => false,
+			'plausible_track_power_users' => false,
+			'plausible_analytics_tracking_disabled' => false,
+
+			// Matomo Analytics
+			'matomo_analytics' => false,
+			'matomo_site_id' => '',
+			'matomo_api_key' => '',
+			'matomo_server_url' => '',
+			'matomo_track_logged_users' => false,
+			'matomo_track_power_users' => false,
+			'matomo_analytics_tracking_disabled' => false,
 
 			// Search Console module (Pro). When enabled, surfaces its own tab in
 			// the admin with quick wins, top queries/pages, and post pulse — pulling
@@ -2793,37 +2823,89 @@ class Meow_MWSEO_Core
 
 	// TODO [2025]: Refactor to unified analytics provider interface
 	function get_plausible_analytics_data( $args = array() ) {
-		if ( !isset( $this->pro->plausible_analytics ) ) {
+		if ( !isset( $this->plausibleanalytics_module ) ) {
 			return array();
 		}
 
-		return $this->pro->plausible_analytics->get_data( $args );
+		return $this->plausibleanalytics_module->get_data( $args );
 	}
 
 	// TODO [2025]: Refactor to unified analytics provider interface
 	function get_plausible_analytics_summary( $start_date = null, $end_date = null ) {
-		if ( !isset( $this->pro->plausible_analytics ) ) {
+		if ( !isset( $this->plausibleanalytics_module ) ) {
 			return array();
 		}
 
-		return $this->pro->plausible_analytics->get_summary( $start_date, $end_date );
+		return $this->plausibleanalytics_module->get_summary( $start_date, $end_date );
 	}
 
 	function get_plausible_analytics_post_analytics( $page_path, $start_date = null, $end_date = null ) {
-		if ( !isset( $this->pro->plausible_analytics ) ) {
+		if ( !isset( $this->plausibleanalytics_module ) ) {
 			return array();
 		}
 
-		return $this->pro->plausible_analytics->get_post_analytics( $page_path, $start_date, $end_date );
+		return $this->plausibleanalytics_module->get_post_analytics( $page_path, $start_date, $end_date );
 	}
 
 	// TODO [2025]: Refactor to unified analytics provider interface
 	function get_plausible_analytics_top_posts( $start_date = null, $end_date = null, $limit = 10 ) {
-		if ( !isset( $this->pro->plausible_analytics ) ) {
+		if ( !isset( $this->plausibleanalytics_module ) ) {
 			return array();
 		}
 
-		return $this->pro->plausible_analytics->get_top_posts( $start_date, $end_date, $limit );
+		return $this->plausibleanalytics_module->get_top_posts( $start_date, $end_date, $limit );
+	}
+
+	// Matomo Analytics
+
+	function get_matomo_analytics_data( $args = array() ) {
+		if ( !isset( $this->matomoanalytics_module ) ) {
+			return array();
+		}
+
+		return $this->matomoanalytics_module->get_data( $args );
+	}
+
+	function get_matomo_analytics_summary( $start_date = null, $end_date = null ) {
+		if ( !isset( $this->matomoanalytics_module ) ) {
+			return array();
+		}
+
+		return $this->matomoanalytics_module->get_summary( $start_date, $end_date );
+	}
+
+	function get_matomo_analytics_post_analytics( $page_path, $start_date = null, $end_date = null ) {
+		if ( !isset( $this->matomoanalytics_module ) ) {
+			return array();
+		}
+
+		return $this->matomoanalytics_module->get_post_analytics( $page_path, $start_date, $end_date );
+	}
+
+	function get_matomo_analytics_top_posts( $args = array() ) {
+		if ( !isset( $this->matomoanalytics_module ) ) {
+			return array();
+		}
+
+		return $this->matomoanalytics_module->get_top_posts( $args );
+	}
+
+	// Matomo exposes a real per-day, per-page report, so unlike Plausible it can feed
+	// the Content SEO sparklines and per-post totals.
+	function get_matomo_analytics_pages_daily( $start_date = null, $end_date = null, $paths = null ) {
+		if ( !isset( $this->matomoanalytics_module ) ) {
+			return array();
+		}
+
+		return $this->matomoanalytics_module->get_pages_daily( $start_date, $end_date, $paths );
+	}
+
+	function get_matomo_analytics_pages_totals( $start_date = null, $end_date = null ) {
+		if ( !isset( $this->matomoanalytics_module ) ) {
+			return array();
+		}
+
+		return $this->matomoanalytics_module->get_pages_totals( $start_date, $end_date );
 	}
 
 	#endregion
