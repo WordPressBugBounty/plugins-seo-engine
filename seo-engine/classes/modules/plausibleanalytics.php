@@ -245,6 +245,23 @@ class Meow_MWSEO_Modules_PlausibleAnalytics
 	}
 
 	/**
+	 * Visitors on the site right now. The realtime endpoint answers with a bare number.
+	 */
+	public function get_realtime_data() {
+		if ( ! $this->is_configured() ) {
+			return array();
+		}
+
+		try {
+			$data = $this->make_request( 'stats/realtime/visitors' );
+
+			return array( 'active_users' => (int) $data );
+		} catch ( Exception $e ) {
+			return array();
+		}
+	}
+
+	/**
 	 * Get top posts/pages.
 	 */
 	// TODO [2025]: Refactor to unified analytics provider interface

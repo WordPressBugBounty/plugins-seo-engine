@@ -418,6 +418,11 @@ class Meow_MWSEO_Rest
 				'permission_callback' => array( $this->core, 'can_access_settings' ),
 				'callback' => array( $this, 'rest_get_analytics_summary' )
 			) );
+			register_rest_route( $this->namespace, '/analytics/realtime', array(
+				'methods' => 'POST',
+				'permission_callback' => array( $this->core, 'can_access_settings' ),
+				'callback' => array( $this, 'rest_get_analytics_realtime' )
+			) );
 			register_rest_route( $this->namespace, '/analytics/top_posts', array(
 				'methods' => 'POST',
 				'permission_callback' => array( $this->core, 'can_access_settings' ),
@@ -3492,6 +3497,20 @@ class Meow_MWSEO_Rest
 				'message' => $e->getMessage()
 			], 500 );
 		}
+	}
+
+	function rest_get_analytics_realtime( $request ) {
+		// Realtime is a bonus card, never a reason to fail the whole dashboard.
+		try {
+			$data = $this->core->get_analytics_realtime_data();
+		} catch ( Exception $e ) {
+			$data = array();
+		}
+
+		return new WP_REST_Response( [
+			'success' => true,
+			'data' => $data
+		], 200 );
 	}
 
 	// TODO [2025]: Refactor to unified analytics provider interface

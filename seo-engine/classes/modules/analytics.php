@@ -963,6 +963,28 @@ class Meow_MWSEO_Modules_Analytics
 		}
 	}
 
+	/**
+	 * Visitors on the site right now, when the display source can tell us.
+	 * Private Analytics only stores one row per visitor and post per hour, so it cannot
+	 * answer this honestly and the card stays hidden.
+	 */
+	public function get_realtime_data()
+	{
+		switch ( $this->core->get_option( 'analytics_method', 'private' ) ) {
+			case 'google':
+				return $this->core->get_google_analytics_realtime_data();
+
+			case 'plausible':
+				return $this->core->get_plausible_analytics_realtime_data();
+
+			case 'matomo':
+				return $this->core->get_matomo_analytics_realtime_data();
+
+			default:
+				return array();
+		}
+	}
+
 	public function get_ai_agents_summary( $start_date = null, $end_date = null )
 	{
 		global $wpdb;

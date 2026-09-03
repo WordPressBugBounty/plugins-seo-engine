@@ -227,13 +227,28 @@ class Meow_MWSEO_Modules_MatomoAnalytics
 				'date' => $start_date . ',' . $end_date,
 			) );
 
+			// nb_actions also counts downloads, outlinks and site searches, so real page views
+			// come from Actions.get. Falls back to nb_actions if that report is unavailable.
+			$pageviews = isset( $data['nb_actions'] ) ? (int) $data['nb_actions'] : 0;
+			try {
+				$actions = $this->make_request( 'Actions.get', array(
+					'period' => 'range',
+					'date' => $start_date . ',' . $end_date,
+				) );
+				if ( isset( $actions['nb_pageviews'] ) ) {
+					$pageviews = (int) $actions['nb_pageviews'];
+				}
+			} catch ( Exception $e ) {
+				// Keep the nb_actions estimate.
+			}
+
 			$summary = array(
 				'total_visits' => isset( $data['nb_visits'] ) ? (int) $data['nb_visits'] : 0,
 				'unique_visitors' => $this->unique_visitors( $data ),
 				'unique_posts' => 0, // Matomo doesn't provide this
 				'logged_in_visits' => 0, // Matomo doesn't track this
 				'bounce_rate' => $this->parse_percentage( isset( $data['bounce_rate'] ) ? $data['bounce_rate'] : 0 ),
-				'pageviews' => isset( $data['nb_actions'] ) ? (int) $data['nb_actions'] : 0,
+				'pageviews' => $pageviews,
 				'views_per_visit' => isset( $data['nb_actions_per_visit'] ) ? (float) $data['nb_actions_per_visit'] : 0,
 				'visit_duration' => isset( $data['avg_time_on_site'] ) ? (int) $data['avg_time_on_site'] : 0,
 			);
@@ -255,6 +270,27 @@ class Meow_MWSEO_Modules_MatomoAnalytics
 				'views_per_visit' => 0,
 				'visit_duration' => 0,
 			);
+		}
+	}
+
+	/**
+	 * Visitors seen in the last few minutes. Needs the Live plugin, which is bundled and
+	 * enabled by default in Matomo, so a failure here just hides the card.
+	 */
+	public function get_realtime_data() {
+		if ( ! $this->is_configured() ) {
+			return array();
+		}
+
+		try {
+			$data = $this->make_request( 'Live.getCounters', array( 'lastMinutes' => 5 ) );
+			$row = isset( $data[0] ) && is_array( $data[0] ) ? $data[0] : array();
+
+			return array(
+				'active_users' => isset( $row['visitors'] ) ? (int) $row['visitors'] : 0,
+			);
+		} catch ( Exception $e ) {
+			return array();
 		}
 	}
 

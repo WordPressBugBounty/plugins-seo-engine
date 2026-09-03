@@ -2462,6 +2462,14 @@ class Meow_MWSEO_Core
 		return $this->analytics_module->get_analytics_summary( $start_date, $end_date );
 	}
 
+	function get_analytics_realtime_data() {
+		if ( !isset( $this->analytics_module ) ) {
+			return array();
+		}
+
+		return $this->analytics_module->get_realtime_data();
+	}
+
 	// TODO [2025]: Refactor to unified analytics provider interface
 	function get_top_posts( $args = array() ) {
 		if ( !isset( $this->analytics_module ) ) {
@@ -2847,6 +2855,14 @@ class Meow_MWSEO_Core
 		return $this->plausibleanalytics_module->get_post_analytics( $page_path, $start_date, $end_date );
 	}
 
+	function get_plausible_analytics_realtime_data() {
+		if ( !isset( $this->plausibleanalytics_module ) ) {
+			return array();
+		}
+
+		return $this->plausibleanalytics_module->get_realtime_data();
+	}
+
 	// TODO [2025]: Refactor to unified analytics provider interface
 	function get_plausible_analytics_top_posts( $start_date = null, $end_date = null, $limit = 10 ) {
 		if ( !isset( $this->plausibleanalytics_module ) ) {
@@ -2888,6 +2904,14 @@ class Meow_MWSEO_Core
 		}
 
 		return $this->matomoanalytics_module->get_top_posts( $args );
+	}
+
+	function get_matomo_analytics_realtime_data() {
+		if ( !isset( $this->matomoanalytics_module ) ) {
+			return array();
+		}
+
+		return $this->matomoanalytics_module->get_realtime_data();
 	}
 
 	// Matomo exposes a real per-day, per-page report, so unlike Plausible it can feed
