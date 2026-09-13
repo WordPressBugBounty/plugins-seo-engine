@@ -160,20 +160,26 @@ class Meow_MWSEO_Score {
 	}
 
 	/**
+	 * The title as it appears in search results: the SEO title override when set,
+	 * otherwise the post title with the site name appended. Must stay in sync with
+	 * Meow_MWSEO_Core::build_title(), which is what actually renders on the frontend —
+	 * including the meta key it reads, so the score matches the rendered title.
+	 */
+	private function full_page_title( $post ) {
+		$seo_title = get_post_meta( $post->ID, $this->core->meta_key_seo_title, true );
+
+		if ( !empty( $seo_title ) ) {
+			return $seo_title;
+		}
+
+		return $post->post_title . " | " . trim( get_bloginfo( 'name' ) );
+	}
+
+	/**
 	 * Analyze post content and extract signals
 	 */
 	private function analyze_post( $post ) {
-		$seo_title = get_post_meta( $post->ID, '_mwseo_title', true );
-		$title = !empty( $seo_title ) ? $seo_title : $post->post_title;
-		$excerpt = get_post_meta( $post->ID, '_mwseo_excerpt', true ) ?: $post->post_excerpt;
-
-		// Calculate full page title length (as it appears in search results)
-		if ( !empty( $seo_title ) ) {
-			$full_page_title = $seo_title;
-		} else {
-			$site_name = trim( get_bloginfo( 'name' ) );
-			$full_page_title = $post->post_title . " | " . $site_name;
-		}
+		$excerpt = get_post_meta( $post->ID, $this->core->meta_key_seo_excerpt, true ) ?: $post->post_excerpt;
 
 		$analysis = [
 			'title' => $post->post_title,
@@ -182,7 +188,7 @@ class Meow_MWSEO_Score {
 			'content' => apply_filters( 'mwseo_post_content', wp_strip_all_tags( $post->post_content ), $post, true ),
 			'content_html' => apply_filters( 'mwseo_post_content', $post->post_content, $post, false ),
 			'word_count' => 0,
-			'title_length' => mb_strlen( $full_page_title ),
+			'title_length' => mb_strlen( $this->full_page_title( $post ) ),
 			'excerpt_length' => mb_strlen( $excerpt ),
 			'images' => [],
 			'links' => ['internal' => [], 'external' => []],
@@ -1221,20 +1227,8 @@ class Meow_MWSEO_Score {
 	}
 
 	private function test_title_length( $post, $analysis ) {
-		$seo_title = get_post_meta( $post->ID, '_mwseo_title', true );
-
-		// Build the full rendered page title (as it appears in search results)
-		if ( !empty( $seo_title ) ) {
-			// SEO Title is set - this is already the full page title
-			$title = $seo_title;
-		} else {
-			// No override - construct the full page title with site name
-			$site_name = trim( get_bloginfo( 'name' ) );
-			$title = $analysis['title'] . " | " . $site_name;
-		}
-
 		// Use display width (CJK chars count as 2) for consistent SERP measurement
-		$width = $this->core->get_display_width( $title );
+		$width = $this->core->get_display_width( $this->full_page_title( $post ) );
 
 		if ( $width === 0 ) return 'NA'; // Can't check length if title doesn't exist
 
@@ -1827,10 +1821,10 @@ class Meow_MWSEO_Score {
 				// show "before → after" inline (title and meta-description fixes).
 				$current = '';
 				if ( in_array( $test, ['title_length', 'title_exists', 'title_unique_sitewide'], true ) ) {
-					$seo_title = get_post_meta( $pid, '_mwseo_title', true );
+					$seo_title = get_post_meta( $pid, $this->core->meta_key_seo_title, true );
 					$current = ( $seo_title !== '' && $seo_title !== false ) ? $seo_title : ( $p ? $p->post_title : '' );
 				} else if ( in_array( $test, ['excerpt_exists', 'excerpt_length'], true ) ) {
-					$seo_ex = get_post_meta( $pid, '_mwseo_excerpt', true );
+					$seo_ex = get_post_meta( $pid, $this->core->meta_key_seo_excerpt, true );
 					$current = ( $seo_ex !== '' && $seo_ex !== false ) ? $seo_ex : ( $p ? $p->post_excerpt : '' );
 				}
 

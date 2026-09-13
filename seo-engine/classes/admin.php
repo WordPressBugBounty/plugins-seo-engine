@@ -14,7 +14,7 @@ class Meow_MWSEO_Admin extends MeowKit_MWSEO_Admin {
 			add_action( 'admin_menu', array( $this, 'reorder_surgical_submenu' ), 999 );
 
 			// Load the scripts only if they are needed by the current screen
-			$page = isset( $_GET["page"] ) ? sanitize_text_field( $_GET["page"] ) : null;
+			$page = isset( $_GET["page"] ) ? sanitize_text_field( $_GET["page"] ) : '';
 
 			$is_seo_engine_screen = in_array( $page, [ MWSEO_PREFIX . '_settings', 'seo_engine_dashboard' ] );
 			$is_meowapps_dashboard = $page === 'meowapps-main-menu';

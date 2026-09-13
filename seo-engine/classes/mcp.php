@@ -1251,6 +1251,125 @@ class Meow_MWSEO_MCP {
           'required' => [ 'brand_id' ]
         ]
       ];
+
+      $tools[] = [
+        'name' => 'mwseo_ai_visibility_suggest_questions',
+        'description' => 'Propose the buyer-intent questions worth testing for a brand or product, without creating anything. Questions are about the category (e.g. "best plugin to find unused media in WordPress"), never about the brand by name. Use this to review a question set before adding a brand, or to hand a list to a human to paste into the admin.',
+        'category' => 'SEO Engine',
+        'accessLevel' => 'read',
+        'inputSchema' => [
+          'type' => 'object',
+          'properties' => [
+            'name' => [
+              'type' => 'string',
+              'description' => 'The brand or product name, e.g. "Media Cleaner".'
+            ],
+            'description' => [
+              'type' => 'string',
+              'description' => 'What the product does, in one or two sentences. This matters: the name alone rarely says what people would actually ask an assistant for.'
+            ],
+            'competitors' => [
+              'type' => 'array',
+              'items' => [ 'type' => 'string' ],
+              'description' => 'Known competing products, to steer the category framing.'
+            ]
+          ],
+          'required' => [ 'name' ]
+        ]
+      ];
+
+      $tools[] = [
+        'name' => 'mwseo_ai_visibility_add_brand',
+        'description' => 'Start tracking a brand or product in AI Visibility. Creates it with a set of questions (yours, or generated from the name and description when you pass none) and returns the brand_id. Adding a brand does not scan it: run mwseo_ai_visibility_scan afterwards to get a score.',
+        'category' => 'SEO Engine',
+        'accessLevel' => 'write',
+        'inputSchema' => [
+          'type' => 'object',
+          'properties' => [
+            'name' => [
+              'type' => 'string',
+              'description' => 'The brand or product name, exactly as people would write it.'
+            ],
+            'url' => [
+              'type' => 'string',
+              'description' => 'The product page or site URL.'
+            ],
+            'description' => [
+              'type' => 'string',
+              'description' => 'What the product does, in one or two sentences. Used to generate the questions when none are given.'
+            ],
+            'competitors' => [
+              'type' => 'array',
+              'items' => [ 'type' => 'string' ],
+              'description' => 'Known competing products to watch for in the answers.'
+            ],
+            'questions' => [
+              'type' => 'array',
+              'items' => [ 'type' => 'string' ],
+              'description' => 'The questions to test, about the category rather than the brand. When omitted, a set is generated automatically.'
+            ]
+          ],
+          'required' => [ 'name' ]
+        ]
+      ];
+
+      $tools[] = [
+        'name' => 'mwseo_ai_visibility_scan',
+        'description' => 'Scan a tracked brand: ask every question on every configured AI provider and record whether the brand was recommended, at what rank, and against which competitors. This spends real money (one AI call per question per provider), so the first call is always a dry run reporting the plan and the estimated cost, and nothing runs until you call again with confirm set to true. Scanning is chunked so it never times out: each call runs a few units and returns the batch and next_offset to pass back, until remaining reaches 0 and the score is finalized.',
+        'category' => 'SEO Engine',
+        'accessLevel' => 'write',
+        'inputSchema' => [
+          'type' => 'object',
+          'properties' => [
+            'brand_id' => [
+              'type' => 'integer',
+              'description' => 'The tracked brand ID, from mwseo_ai_visibility_brands.'
+            ],
+            'confirm' => [
+              'type' => 'boolean',
+              'description' => 'Must be true to actually spend AI calls. Without it the tool only reports the plan and the estimated cost.',
+              'default' => false
+            ],
+            'batch' => [
+              'type' => 'string',
+              'description' => 'Continue an in-progress scan: the batch returned by the previous call. Omit to start a new scan.'
+            ],
+            'offset' => [
+              'type' => 'integer',
+              'description' => 'Continue an in-progress scan: the next_offset returned by the previous call.',
+              'default' => 0
+            ],
+            'max_units' => [
+              'type' => 'integer',
+              'description' => 'How many question-by-provider units to run in this call (1 to 20, default 6). Higher is faster but risks a request timeout.',
+              'default' => 6
+            ]
+          ],
+          'required' => [ 'brand_id' ]
+        ]
+      ];
+
+      $tools[] = [
+        'name' => 'mwseo_ai_visibility_delete_brand',
+        'description' => 'Stop tracking a brand and permanently delete it with all of its scan history. Call once without confirm to see what would be deleted, then again with confirm set to true.',
+        'category' => 'SEO Engine',
+        'accessLevel' => 'write',
+        'inputSchema' => [
+          'type' => 'object',
+          'properties' => [
+            'brand_id' => [
+              'type' => 'integer',
+              'description' => 'The tracked brand ID, from mwseo_ai_visibility_brands.'
+            ],
+            'confirm' => [
+              'type' => 'boolean',
+              'description' => 'Must be true to actually delete. Without it the tool only reports what would be removed.',
+              'default' => false
+            ]
+          ],
+          'required' => [ 'brand_id' ]
+        ]
+      ];
     }
 
     return $tools;
@@ -2463,6 +2582,7 @@ class Meow_MWSEO_MCP {
               'score'        => $b['score'],
               'providers'    => $providers,
               'mentions'     => isset( $m['mentions'] ) ? $m['mentions'] : 0,
+              'citations'    => isset( $m['citations'] ) ? $m['citations'] : 0,
               'checks'       => isset( $m['total'] ) ? $m['total'] : 0,
               'sentiment'    => isset( $m['sentiment'] ) ? $m['sentiment'] : null,
               'last_scan_at' => $b['last_scan_at'],
@@ -2470,7 +2590,7 @@ class Meow_MWSEO_MCP {
           }
           return [ 'success' => true, 'data' => array(
             'brands' => $brands,
-            'note'   => 'Scores measure what AI models answer from memory (no live web browsing). 0 means the brand was never mentioned.',
+            'note'   => 'Scores measure what AI models answer from memory (no live web browsing). 0 means the brand was never mentioned. "mentions" is how many checks named the brand, "citations" how many also linked to it: a mention without a citation rarely turns into a click.',
           ) ];
         }
 
@@ -2494,6 +2614,181 @@ class Meow_MWSEO_MCP {
             'queries'     => $mod->get_brand_queries( $brand_id ),
             'competitors' => $mod->get_brand_competitors( $brand_id ),
             'timeseries'  => $mod->get_brand_timeseries( $brand_id ),
+          ) ];
+        }
+
+        case 'mwseo_ai_visibility_suggest_questions': {
+          $mod = $this->core->ai_visibility();
+          if ( !$mod || !$mod->is_enabled() ) {
+            return [ 'success' => false, 'error' => 'AI Visibility is not enabled.' ];
+          }
+          $questions = $mod->generate_queries( array(
+            'name'        => isset( $args['name'] ) ? (string) $args['name'] : '',
+            'description' => isset( $args['description'] ) ? (string) $args['description'] : '',
+            'competitors' => isset( $args['competitors'] ) ? $args['competitors'] : array(),
+          ) );
+          if ( is_wp_error( $questions ) ) {
+            return [ 'success' => false, 'error' => $questions->get_error_message() ];
+          }
+          return [ 'success' => true, 'data' => array(
+            'questions' => $questions,
+            'note'      => 'Nothing was created. Pass an edited list as the "questions" argument of mwseo_ai_visibility_add_brand.',
+          ) ];
+        }
+
+        case 'mwseo_ai_visibility_add_brand': {
+          $mod = $this->core->ai_visibility();
+          if ( !$mod || !$mod->is_enabled() ) {
+            return [ 'success' => false, 'error' => 'AI Visibility is not enabled.' ];
+          }
+          $name = isset( $args['name'] ) ? trim( (string) $args['name'] ) : '';
+          if ( $name === '' ) {
+            return [ 'success' => false, 'error' => 'A brand or product name is required.' ];
+          }
+          $questions = ( isset( $args['questions'] ) && is_array( $args['questions'] ) ) ? $args['questions'] : array();
+          $generated = false;
+          if ( empty( $questions ) ) {
+            $questions = $mod->generate_queries( array(
+              'name'        => $name,
+              'description' => isset( $args['description'] ) ? (string) $args['description'] : '',
+              'competitors' => isset( $args['competitors'] ) ? $args['competitors'] : array(),
+            ) );
+            if ( is_wp_error( $questions ) ) {
+              return [ 'success' => false, 'error' => 'Could not generate questions: ' . $questions->get_error_message() ];
+            }
+            $generated = true;
+          }
+          $brand = $mod->save_brand( array(
+            'name'        => $name,
+            'url'         => isset( $args['url'] ) ? (string) $args['url'] : '',
+            'description' => isset( $args['description'] ) ? (string) $args['description'] : '',
+            'competitors' => isset( $args['competitors'] ) ? $args['competitors'] : array(),
+            'queries'     => $questions,
+            'enabled'     => 1,
+          ) );
+          if ( is_wp_error( $brand ) ) {
+            return [ 'success' => false, 'error' => $brand->get_error_message() ];
+          }
+          return [ 'success' => true, 'data' => array(
+            'brand_id'            => $brand['id'],
+            'name'                => $brand['name'],
+            'url'                 => $brand['url'],
+            'questions'           => $brand['queries'],
+            'questions_generated' => $generated,
+            'next'                => 'The brand has no data yet. Run mwseo_ai_visibility_scan with this brand_id to score it.',
+          ) ];
+        }
+
+        case 'mwseo_ai_visibility_scan': {
+          $mod = $this->core->ai_visibility();
+          if ( !$mod || !$mod->is_enabled() ) {
+            return [ 'success' => false, 'error' => 'AI Visibility is not enabled.' ];
+          }
+          $brand_id = isset( $args['brand_id'] ) ? intval( $args['brand_id'] ) : 0;
+          $plan = $mod->build_scan_plan( $brand_id );
+          if ( is_wp_error( $plan ) ) {
+            return [ 'success' => false, 'error' => $plan->get_error_message() ];
+          }
+          $brand = $mod->get_brand( $brand_id );
+          $total = (int) $plan['total'];
+          $batch = isset( $args['batch'] ) ? preg_replace( '/[^a-zA-Z0-9_]/', '', (string) $args['batch'] ) : '';
+
+          // The dry run is the guard: a scan is one paid AI call per unit, so the
+          // first call never spends anything. Resuming a batch is already confirmed.
+          if ( $batch === '' && empty( $args['confirm'] ) ) {
+            $surfaces = array();
+            foreach ( $plan['units'] as $u ) {
+              $label = $u['surface']['provider'] . ' / ' . $u['surface']['label'];
+              $surfaces[ $label ] = true;
+            }
+            $estimate = $mod->estimate_scan_cost( $total );
+            return [ 'success' => true, 'data' => array(
+              'dry_run'            => true,
+              'brand'              => $brand['name'],
+              'questions'          => count( $brand['queries'] ),
+              'surfaces'           => array_keys( $surfaces ),
+              'units'              => $total,
+              'estimated_cost_usd' => $estimate,
+              'cost_basis'         => $estimate === null
+                ? 'Unknown: no provider on this site has ever reported a price, so the only honest figure is the number of paid calls above.'
+                : 'Average cost of the units already scanned on this site.',
+              'note'               => 'Nothing was scanned. Each unit is one paid AI call. Call again with confirm set to true to start, then keep calling with the returned batch and next_offset until remaining is 0.',
+            ) ];
+          }
+
+          if ( $batch === '' ) { $batch = $plan['batch']; }
+          $offset = isset( $args['offset'] ) ? max( 0, intval( $args['offset'] ) ) : 0;
+          $max = isset( $args['max_units'] ) ? intval( $args['max_units'] ) : 6;
+          $max = max( 1, min( 20, $max ) );
+          $slice = array_slice( $plan['units'], $offset, $max );
+
+          $results = array();
+          $cost = 0;
+          foreach ( $slice as $unit ) {
+            $one = $mod->scan_one( $brand_id, $unit['query'], $unit['surface'], $batch );
+            if ( is_wp_error( $one ) ) {
+              // Keep what already ran: the batch is resumable from where it stopped.
+              return [ 'success' => false, 'error' => $one->get_error_message()
+                . ' Scan stopped after ' . count( $results ) . ' unit(s). Resume with batch "' . $batch
+                . '" and offset ' . ( $offset + count( $results ) ) . '.' ];
+            }
+            if ( $one['cost'] !== null ) { $cost += (float) $one['cost']; }
+            $results[] = array(
+              'question'  => $one['query'],
+              'provider'  => $one['provider'],
+              'mentioned' => $one['mentioned'],
+              'rank'      => $one['rank'],
+              'cited'     => $one['cited'],
+            );
+          }
+
+          $offset += count( $slice );
+          $remaining = max( 0, $total - $offset );
+          $data = array(
+            'batch'       => $batch,
+            'scanned'     => $offset,
+            'total'       => $total,
+            'remaining'   => $remaining,
+            'cost_usd'    => round( $cost, 5 ),
+            'results'     => $results,
+          );
+          if ( $remaining > 0 ) {
+            $data['next_offset'] = $offset;
+            $data['next'] = 'Call mwseo_ai_visibility_scan again with the same brand_id, batch "' . $batch . '", offset ' . $offset . ' and confirm true.';
+          }
+          else {
+            $brand = $mod->finalize_scan( $brand_id );
+            $data['done'] = true;
+            $data['score'] = $brand['score'];
+            $data['next'] = 'Scan complete. Use mwseo_ai_visibility_detail for the per-question breakdown.';
+          }
+          return [ 'success' => true, 'data' => $data ];
+        }
+
+        case 'mwseo_ai_visibility_delete_brand': {
+          $mod = $this->core->ai_visibility();
+          if ( !$mod || !$mod->is_enabled() ) {
+            return [ 'success' => false, 'error' => 'AI Visibility is not enabled.' ];
+          }
+          $brand_id = isset( $args['brand_id'] ) ? intval( $args['brand_id'] ) : 0;
+          $brand = $mod->get_brand( $brand_id );
+          if ( !$brand ) {
+            return [ 'success' => false, 'error' => 'Brand not found.' ];
+          }
+          if ( empty( $args['confirm'] ) ) {
+            return [ 'success' => true, 'data' => array(
+              'deleted'  => false,
+              'brand_id' => $brand['id'],
+              'name'     => $brand['name'],
+              'score'    => $brand['score'],
+              'note'     => 'Nothing was deleted. This would permanently remove the brand and its whole scan history. Call again with confirm set to true.',
+            ) ];
+          }
+          $mod->delete_brand( $brand_id );
+          return [ 'success' => true, 'data' => array(
+            'deleted'  => true,
+            'brand_id' => $brand['id'],
+            'name'     => $brand['name'],
           ) ];
         }
 

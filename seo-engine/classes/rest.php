@@ -716,7 +716,11 @@ class Meow_MWSEO_Rest
 	function rest_settings_update( $request ) {
 		try {
 			$params = $request->get_json_params();
-			$value = $params['options'];
+			$value = $params['options'] ?? null;
+			// An empty payload (e.g. an old {} settings export) would otherwise wipe every option.
+			if ( !is_array( $value ) || empty( $value ) ) {
+				return new WP_REST_Response([ 'success' => false, 'message' => __( 'No settings were provided.', 'seo-engine' ) ], 400 );
+			}
 			$options = $this->core->update_options( $value );
 			$success = !!$options;
 			$message = __( $success ? 'OK' : "Could not update options.", 'seo-engine' );

@@ -28,7 +28,9 @@ class Meow_MWSEO_Modules_GoogleAnalytics
 	private $base_url     = 'https://analyticsdata.googleapis.com/v1beta/';
 	private $realtime_url = 'https://analyticsdata.googleapis.com/v1beta/';
 
-	const TRANSIENT_TOKEN_INFO = 'mwseo_google_analytics_token_info';
+	// Tokens live in an option, not a transient: an external object cache (Redis, Memcache)
+	// or any cache-flushing plugin wipes transients, which silently disconnected Google.
+	const OPTION_TOKEN_INFO = 'mwseo_google_analytics_token_info';
 	const TRANSIENT_REPORT_PREFIX = 'mwseo_google_analytics_report_';
 
 	public function __construct( $core )
@@ -70,7 +72,7 @@ class Meow_MWSEO_Modules_GoogleAnalytics
 			return;
 		}
 
-		$token_info = get_transient( self::TRANSIENT_TOKEN_INFO );
+		$token_info = $this->get_token_info();
 
 		if ( $token_info && isset( $token_info['access_token'] ) ) {
 			$this->current_access_token = $token_info['access_token'];
@@ -82,6 +84,28 @@ class Meow_MWSEO_Modules_GoogleAnalytics
 			$this->current_expires_at = $token_info['expires_at'];
 		}
   	
+	}
+
+	/**
+	 * Read the stored token info, migrating it out of the legacy transient on the way.
+	 */
+	private function get_token_info() {
+		$token_info = get_option( self::OPTION_TOKEN_INFO );
+
+		if ( empty( $token_info ) ) {
+			$legacy = get_transient( self::OPTION_TOKEN_INFO );
+			if ( is_array( $legacy ) ) {
+				$token_info = $legacy;
+				$this->set_token_info( $legacy );
+			}
+			delete_transient( self::OPTION_TOKEN_INFO );
+		}
+
+		return is_array( $token_info ) ? $token_info : null;
+	}
+
+	private function set_token_info( $token_info ) {
+		update_option( self::OPTION_TOKEN_INFO, $token_info, false );
 	}
 
 	private function check_properties() {
@@ -125,7 +149,8 @@ class Meow_MWSEO_Modules_GoogleAnalytics
 	public function unlink() {
 		$this->core->log( "🔗 Unlinking Google Analytics." );
 
-		delete_transient( self::TRANSIENT_TOKEN_INFO );
+		delete_option( self::OPTION_TOKEN_INFO );
+		delete_transient( self::OPTION_TOKEN_INFO );
 
 		$this->current_access_token = null;
 		$this->current_refresh_token = null;
@@ -220,7 +245,7 @@ class Meow_MWSEO_Modules_GoogleAnalytics
 			'refresh_token' => $refresh_token
 		);
 
-		set_transient( self::TRANSIENT_TOKEN_INFO, $token_info );
+		$this->set_token_info( $token_info );
 
 		// Update instance variables so current request can use the new token
 		$this->current_access_token = $access_token;
@@ -264,7 +289,7 @@ class Meow_MWSEO_Modules_GoogleAnalytics
 			'refresh_token' => $this->current_refresh_token
 		);
 
-		set_transient( self::TRANSIENT_TOKEN_INFO, $token_info );
+		$this->set_token_info( $token_info );
 
 		// Update instance variables so current request uses the new token
 		$this->current_access_token = $access_token;
