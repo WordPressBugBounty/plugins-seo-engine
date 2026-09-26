@@ -26,7 +26,10 @@ class Meow_MWSEO_API {
     $post = get_post( $post_id );
     if ( ! $post ) { return [ "success" => false, "message" => "Post not found." ]; }
 
+    // Report what actually happened: core returns false when the title is empty after
+    // strip_tags, and saying "success" there sent a user hunting for a phantom write bug.
     $result = $this->core->set_seo_title( $post, $title );
+    if ( ! $result ) { return [ "success" => false, "message" => "The title was empty after sanitization, nothing was saved." ]; }
     return [ "success" => true, "data" => $result ];
     }
 
@@ -47,6 +50,7 @@ class Meow_MWSEO_API {
     if ( ! $post ) { return [ "success" => false, "message" => "Post not found." ]; }
 
     $result = $this->core->set_seo_excerpt( $post, $excerpt );
+    if ( ! $result ) { return [ "success" => false, "message" => "The excerpt was empty after sanitization, nothing was saved." ]; }
     return [ "success" => true, "data" => $result ];
     }
 

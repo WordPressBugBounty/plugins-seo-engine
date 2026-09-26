@@ -1836,6 +1836,7 @@ class Meow_MWSEO_Score {
 					'test_score' => (int) $score,
 					'penalty'    => round( $applied, 1 ),
 					'edit_url'   => get_edit_post_link( $pid, 'raw' ),
+					'noindex'    => $this->core->is_post_noindexed( $pid ),
 				];
 			}
 		}
@@ -1920,9 +1921,7 @@ class Meow_MWSEO_Score {
 	}
 
 	private function is_noindexed( $post ) {
-		// Check if post has noindex meta
-		$robots = get_post_meta( $post->ID, '_mwseo_robots', true );
-		return strpos( $robots, 'noindex' ) !== false;
+		return $this->core->is_post_noindexed( $post->ID );
 	}
 
 	private function is_orphaned( $post ) {

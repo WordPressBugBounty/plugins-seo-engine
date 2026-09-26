@@ -112,7 +112,6 @@ class Meow_MWSEO_Modules_AIEngine
 		return $this->tile( $label, array(
 			'available' => true,
 			'value' => (int) $overview['global_score'],
-			'period' => __( 'score', 'seo-engine' ),
 		) );
 	}
 

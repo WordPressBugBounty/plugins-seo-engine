@@ -26,28 +26,23 @@ class Meow_MWSEO_Admin extends MeowKit_MWSEO_Admin {
 		}
 
 		add_action( 'wp_head', array( $this, 'seo_engine_headers' ) );
-		add_action( 'wp_head', array( $this, 'seo_engine_sitemap_headers' ) );
+		add_filter( 'wp_robots', array( $this, 'post_robots' ) );
 	}
 
-	function seo_engine_sitemap_headers() {
-
-		$disabled = $this->core->get_option( 'disable_wp_sitemap', false );
-   		$custom   = $this->core->get_option( 'sitemap_custom', false );
-
-		if( $disabled && !$custom ) {
-			return;
+	// Hidden-from-search posts (sitemap exclusion list or _mwseo_robots) get noindex,follow.
+	function post_robots( $robots ) {
+		if ( !is_singular() ) return $robots;
+		$post_id = get_queried_object_id();
+		$value = (string) get_post_meta( $post_id, '_mwseo_robots', true );
+		foreach ( array_filter( array_map( 'trim', explode( ',', $value ) ) ) as $directive ) {
+			$robots[ $directive ] = true;
 		}
-
-		$excluded_posts = $this->core->get_option( 'sitemap_excluded_post_ids', [] );
-		$excluded_posts = array_map( 'intval', $excluded_posts );
-		$post_id = get_the_ID();
-
-		if( !in_array( $post_id, $excluded_posts ) ) {
-			return;
+		if ( $this->core->is_post_noindexed( $post_id ) ) {
+			$robots['noindex'] = true;
+			$robots['follow'] = true;
+			unset( $robots['index'], $robots['max-image-preview'] );
 		}
-
-		echo '<!-- SEO Engine: This post is excluded from the sitemap -->';
-		echo '<meta name="robots" content="noindex, follow">';
+		return $robots;
 	}
 
 	function seo_engine_headers() {

@@ -29,6 +29,13 @@ class Meow_MWSEO_MCP {
     }
   }
 
+  // Duplicate-title key: lowercase, no accents, punctuation as spaces, collapsed whitespace.
+  private function normalize_title( $title ) {
+    $title = mb_strtolower( remove_accents( $title ), 'UTF-8' );
+    $title = (string) preg_replace( '/[^\p{L}\p{N}]+/u', ' ', $title );
+    return trim( $title );
+  }
+
   /**
    * Walk every post matching $query_args, one chunk at a time.
    *
@@ -609,7 +616,7 @@ class Meow_MWSEO_MCP {
 
     $tools[] = [
       'name' => 'mwseo_check_duplicate_titles',
-      'description' => 'Find posts with identical SEO titles. Duplicate titles confuse search engines about which page to rank for a query, hurting SEO for both pages. Returns groups of posts sharing the same title. Fix these by making each title unique and descriptive.',
+      'description' => 'Find published content (posts, pages and every public post type) whose titles collide. It compares the title actually used: the custom SEO title, or the post title when none is set. Titles are compared after normalization (case, spacing, punctuation and accents are ignored). Returns groups with match "exact" (identical titles) or "similar" (identical only after normalization); each post shows its title, post type, and source (seo_title or post_title). Duplicate titles confuse search engines about which page to rank; fix them by making each title unique and descriptive.',
       'category' => 'SEO Engine',
       'accessLevel' => 'read',
       'inputSchema' => [
@@ -1844,33 +1851,50 @@ class Meow_MWSEO_MCP {
           return [ 'success' => true, 'data' => $urls ];
           
         case 'mwseo_check_duplicate_titles':
-          $all_titles = [];
-          $duplicates = [];
-          
-          foreach ( $this->each_post( [ 'post_type' => ['post', 'page'], 'post_status' => 'publish' ] ) as $post ) {
+          // Compare the title that is actually rendered: the custom SEO title, else the post
+          // title (the " | Site Name" suffix is the same for every post, so it's left out).
+          $groups = [];
+          $post_types = array_diff( $this->core->get_post_types(), [ 'attachment' ] );
+          foreach ( $this->each_post( [ 'post_type' => $post_types, 'post_status' => 'publish' ] ) as $post ) {
             $seo_title = get_post_meta( $post->ID, $this->core->meta_key_seo_title, true );
-            if ( $seo_title ) {
-              if ( isset( $all_titles[$seo_title] ) ) {
-                if ( !isset( $duplicates[$seo_title] ) ) {
-                  $duplicates[$seo_title] = [ $all_titles[$seo_title] ];
-                }
-                $duplicates[$seo_title][] = [
-                  'post_id' => $post->ID,
-                  'post_title' => $post->post_title,
-                  'permalink' => get_permalink( $post->ID )
-                ];
-              } else {
-                $all_titles[$seo_title] = [
-                  'post_id' => $post->ID,
-                  'post_title' => $post->post_title,
-                  'permalink' => get_permalink( $post->ID )
-                ];
-              }
+            $source = empty( $seo_title ) ? 'post_title' : 'seo_title';
+            $title = $source === 'seo_title' ? $seo_title : get_the_title( $post );
+            $title = trim( html_entity_decode( wp_strip_all_tags( $title ), ENT_QUOTES, 'UTF-8' ) );
+            $key = $this->normalize_title( $title );
+            if ( $key === '' ) {
+              continue;
             }
+            $groups[$key][] = [
+              'post_id' => $post->ID,
+              'post_type' => $post->post_type,
+              'title' => $title,
+              'source' => $source
+            ];
           }
-          
+
+          $duplicates = [];
+          foreach ( $groups as $posts ) {
+            if ( count( $posts ) < 2 ) {
+              continue;
+            }
+            $titles = array_unique( array_column( $posts, 'title' ) );
+            foreach ( $posts as &$entry ) {
+              $entry['permalink'] = get_permalink( $entry['post_id'] );
+            }
+            unset( $entry );
+            $duplicates[] = [
+              'title' => $posts[0]['title'],
+              'match' => count( $titles ) === 1 ? 'exact' : 'similar',
+              'count' => count( $posts ),
+              'posts' => $posts
+            ];
+          }
+          usort( $duplicates, function ( $a, $b ) {
+            return $b['count'] - $a['count'];
+          } );
+
           return [ 'success' => true, 'data' => $duplicates ];
-          
+
         case 'mwseo_get_seo_statistics':
           $stats = [
             'total_posts' => 0,

@@ -1485,6 +1485,28 @@ class Meow_MWSEO_Core
 		return $options;
 	}
 
+	// "Hidden from search" lives in one place: the sitemap exclusion list (quick edit, Sitemap tab,
+	// Bulk tab). A noindex in _mwseo_robots (imported from another SEO plugin) also counts.
+	function is_post_noindexed( $post_id ) {
+		$excluded = array_map( 'intval', (array) $this->get_option( 'sitemap_excluded_post_ids', [] ) );
+		if ( in_array( (int) $post_id, $excluded, true ) ) return true;
+		return strpos( (string) get_post_meta( $post_id, '_mwseo_robots', true ), 'noindex' ) !== false;
+	}
+
+	function set_posts_noindex( $post_ids, $noindex ) {
+		$post_ids = array_map( 'intval', (array) $post_ids );
+		$excluded = array_map( 'intval', (array) $this->get_option( 'sitemap_excluded_post_ids', [] ) );
+		$excluded = $noindex ? array_merge( $excluded, $post_ids ) : array_diff( $excluded, $post_ids );
+		$this->update_option( 'sitemap_excluded_post_ids', array_values( array_unique( $excluded ) ) );
+		if ( !$noindex ) {
+			foreach ( $post_ids as $pid ) {
+				if ( strpos( (string) get_post_meta( $pid, '_mwseo_robots', true ), 'noindex' ) !== false ) {
+					delete_post_meta( $pid, '_mwseo_robots' );
+				}
+			}
+		}
+	}
+
 	function update_option( $option, $value ) {
 		$options = $this->get_all_options();
 		$options[$option] = $value;
@@ -1693,11 +1715,12 @@ class Meow_MWSEO_Core
 	function import_yoast() {
 		// For all the selected post types, get the _yoast_wpseo_title & _yoast_wpseo_metadesc	and import them to _kiss_seo_title & _kiss_seo_excerpt
 		// TODO: Migrate to _mwseo_title & _mwseo_excerpt
-		$post_types = $this->get_option( 'select_post_types', array( 'post ') );
+		$post_types = $this->get_option( 'select_post_types', array( 'post' ) );
 		$posts = get_posts( array(
 			'post_type' => $post_types,
 			'posts_per_page' => -1,
 			'meta_query' => array(
+				'relation' => 'OR',
 				array(
 					'key' => '_yoast_wpseo_title',
 					'compare' => 'EXISTS',
@@ -1710,8 +1733,8 @@ class Meow_MWSEO_Core
 		) );
 
 		foreach ( $posts as $post ) {
-			$yoast_title = get_post_meta( $post->ID, '_yoast_wpseo_title', true );
-			$yoast_excerpt = get_post_meta( $post->ID, '_yoast_wpseo_metadesc', true );
+			$yoast_title = $this->yoast_replace_vars( get_post_meta( $post->ID, '_yoast_wpseo_title', true ), $post );
+			$yoast_excerpt = $this->yoast_replace_vars( get_post_meta( $post->ID, '_yoast_wpseo_metadesc', true ), $post );
 			$yoast_keywords = get_post_meta( $post->ID, '_yoast_wpseo_focuskw', true );
 
 			if ( !empty( $yoast_title ) ) {
@@ -1732,6 +1755,62 @@ class Meow_MWSEO_Core
 			'posts' => count( $posts ),
 			'redirects' => 0,
 		);
+	}
+
+	/**
+	 * Yoast stores titles/descriptions as templates ("%%title%% %%sep%% %%sitename%%").
+	 * Resolve the common variables into plain text; unknown ones are dropped.
+	 * ponytail: resolved once at import, so a later post rename won't update an imported title.
+	 */
+	function yoast_replace_vars( $text, $post ) {
+		$text = (string) $text;
+		if ( strpos( $text, '%%' ) === false ) return $text;
+
+		$seps = [ 'sc-dash' => '-', 'sc-ndash' => '–', 'sc-mdash' => '—', 'sc-colon' => ':', 'sc-middot' => '·',
+			'sc-bull' => '•', 'sc-star' => '*', 'sc-smstar' => '⋆', 'sc-pipe' => '|', 'sc-tilde' => '~',
+			'sc-laquo' => '«', 'sc-raquo' => '»', 'sc-lt' => '<', 'sc-gt' => '>' ];
+		$yoast_titles = get_option( 'wpseo_titles', [] );
+		$sep = $seps[ $yoast_titles['separator'] ?? 'sc-dash' ] ?? '-';
+
+		$primary_cat = '';
+		$cat_id = (int) get_post_meta( $post->ID, '_yoast_wpseo_primary_category', true );
+		$cats = get_the_category( $post->ID );
+		if ( $cat_id && ( $term = get_term( $cat_id ) ) && !is_wp_error( $term ) ) $primary_cat = $term->name;
+		else if ( !empty( $cats ) ) $primary_cat = $cats[0]->name;
+		$excerpt = has_excerpt( $post ) ? $post->post_excerpt : wp_trim_words( wp_strip_all_tags( strip_shortcodes( $post->post_content ) ), 30, '' );
+
+		$vars = [
+			'title'            => $post->post_title,
+			'sitename'         => get_bloginfo( 'name' ),
+			'sitedesc'         => get_bloginfo( 'description' ),
+			'sep'              => $sep,
+			'excerpt'          => $excerpt,
+			'excerpt_only'     => $post->post_excerpt,
+			'primary_category' => $primary_cat,
+			'category'         => implode( ', ', wp_list_pluck( $cats ?: [], 'name' ) ),
+			'tag'              => implode( ', ', wp_list_pluck( get_the_tags( $post->ID ) ?: [], 'name' ) ),
+			'date'             => get_the_date( '', $post ),
+			'modified'         => get_the_modified_date( '', $post ),
+			'name'             => get_the_author_meta( 'display_name', $post->post_author ),
+			'id'               => $post->ID,
+			'parent_title'     => $post->post_parent ? get_the_title( $post->post_parent ) : '',
+			'focuskw'          => get_post_meta( $post->ID, '_yoast_wpseo_focuskw', true ),
+			'currentyear'      => date_i18n( 'Y' ),
+			'currentmonth'     => date_i18n( 'F' ),
+			'currentday'       => date_i18n( 'j' ),
+			'currentdate'      => date_i18n( get_option( 'date_format' ) ),
+		];
+		$text = preg_replace_callback( '/%%([a-z0-9_]+)%%/i', function( $m ) use ( $vars ) {
+			$key = strtolower( $m[1] );
+			return isset( $vars[ $key ] ) ? (string) $vars[ $key ] : '';
+		}, $text );
+
+		// Tidy what dropped variables leave behind: repeated/edge separators and spaces.
+		$q = preg_quote( $sep, '/' );
+		$text = preg_replace( '/\s+/', ' ', $text );
+		$text = preg_replace( '/(\s*' . $q . '\s*){2,}/u', ' ' . $sep . ' ', $text );
+		$text = preg_replace( '/^(\s*' . $q . '\s*)+|(\s*' . $q . '\s*)+$/u', '', $text );
+		return trim( $text );
 	}
 
 	function get_seo_title( $post ) {

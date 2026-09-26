@@ -1269,7 +1269,7 @@ class Meow_MWSEO_Rest
 				$has_score = !empty( $score_data );
 
 				$gsc_row = isset( $gsc_map[ $post->ID ] ) ? $gsc_map[ $post->ID ] : null;
-				$no_index = isset( $excluded_lookup[ $post->ID ] );
+				$no_index = $this->core->is_post_noindexed( $post->ID );
 
 				$ignored_tests = get_post_meta($post->ID, '_mwseo_ignored_tests', true);
 				$magic_fixes_applied = get_post_meta($post->ID, '_mwseo_issues_fixed', true);
@@ -1530,22 +1530,9 @@ class Meow_MWSEO_Rest
 
 		// Update the no index
 		$no_index = isset( $params['no_index'] ) ? boolVal( $params['no_index'] ) : null;
-		if ( $no_index !== null ) {
-
-			$excluded_posts = $this->core->get_option( 'sitemap_excluded_post_ids', [] );
-			$excluded_posts = array_map( 'intval', $excluded_posts );
-
-			if ( $no_index ) {
-				if ( !in_array( $post_id, $excluded_posts ) ) {
-					$excluded_posts[] = $post_id;
-				}
-			} else {
-				if ( in_array( $post_id, $excluded_posts ) ) {
-					$excluded_posts = array_diff( $excluded_posts, [ $post_id ] );
-				}
-			}
-			
-			$this->core->update_option( 'sitemap_excluded_post_ids', $excluded_posts );
+		if ( $no_index !== null && $no_index !== $this->core->is_post_noindexed( $post_id ) ) {
+			$this->core->set_posts_noindex( [ $post_id ], $no_index );
+			$this->core->calculate_seo_score( get_post( $post_id ), 'quick' );
 		}
 
 		// Update the canonical URL
@@ -1609,8 +1596,8 @@ class Meow_MWSEO_Rest
 	}
 
 	/**
-	 * Bulk-set the robots meta on a set of posts (the free, non-AI "hide thin pages from
-	 * search" action). Writes the same _mwseo_robots key the scorer reads.
+	 * Bulk hide/show posts from search (the free, non-AI "hide thin pages" action).
+	 * A value containing "noindex" hides, an empty value shows them again.
 	 */
 	function rest_bulk_robots( $request ) {
 		$params   = $request->get_json_params();
@@ -1621,24 +1608,16 @@ class Meow_MWSEO_Rest
 			return $this->error_response( 'No posts provided', 'no_posts' );
 		}
 
-		// Whitelist robots directives to avoid storing arbitrary values.
-		$allowed = ['noindex', 'index', 'nofollow', 'follow', 'noarchive', 'nosnippet'];
-		$parts = array_filter( array_map( 'trim', explode( ',', $value ) ) );
-		foreach ( $parts as $p ) {
-			if ( !in_array( $p, $allowed, true ) ) {
-				return $this->error_response( 'Invalid robots value', 'bad_value' );
-			}
-		}
-		$value = implode( ',', $parts );
+		$post_ids = array_values( array_filter( $post_ids, function( $pid ) { return current_user_can( 'edit_post', $pid ); } ) );
+		$this->core->set_posts_noindex( $post_ids, strpos( $value, 'noindex' ) !== false );
 
-		$updated = 0;
+		// Re-score (quick keeps AI data) so the cached noindex flag and score match.
 		foreach ( $post_ids as $pid ) {
-			if ( !current_user_can( 'edit_post', $pid ) ) continue;
-			update_post_meta( $pid, '_mwseo_robots', $value );
-			$updated++;
+			$post = get_post( $pid );
+			if ( $post ) $this->core->calculate_seo_score( $post, 'quick' );
 		}
 
-		return $this->success_response( [ 'updated' => $updated ] );
+		return $this->success_response( [ 'updated' => count( $post_ids ) ] );
 	}
 
 	/**

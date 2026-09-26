@@ -4,7 +4,7 @@ Tags: seo, redirection, sitemap, schema, analytics
 Donate link: https://www.patreon.com/meowapps
 Requires at least: 6.0
 Tested up to: 7.1
-Stable tag: 0.9.4
+Stable tag: 0.9.5
 Requires PHP: 8.1
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
@@ -297,6 +297,15 @@ No. The Redirections & 404 module handles URL redirects (301, 302, 307, 308, 410
 Yes, and it is fully automatic. When you publish or update a post, SEO Engine instantly notifies Bing, Yandex, Naver and every IndexNow-compatible engine, so your content gets crawled right away instead of waiting. The verification key is generated and served for you; there is nothing to configure. Note that Google does not use IndexNow and keeps reading your sitemap instead.
 
 == Changelog ==
+
+= 0.9.5 (2026/09/26) =
+* Add: Hide or keep a post in search from the Content tab, which sets no index and removes it from the sitemap, with a bulk undo after hiding.
+* Update: The Bulk SEO tab now refreshes its list right after an update.
+* Fix: License check failures now show the actual reason and no longer freeze the admin for minutes when our server cannot be reached.
+* Fix: Duplicate title detection now includes posts without an SEO title, near duplicates and custom post types.
+* Fix: Yoast import showed raw text placeholders instead of the actual values.
+* Fix: The AI visibility dashboard tile no longer sends "score" as the period.
+* Fix: Generating an SEO title or excerpt now reports a failure when the result comes back empty, instead of always reporting success.
 
 = 0.9.4 (2026/09/13) =
 * Add: MCP tools to create, scan and delete AI Visibility brands.

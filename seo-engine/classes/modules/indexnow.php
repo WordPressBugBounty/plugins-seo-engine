@@ -54,8 +54,7 @@ class Meow_MWSEO_Modules_IndexNow
 		if ( !in_array( $post->post_type, $public_types, true ) ) return;
 
 		// No-index posts are excluded on purpose; don't ask engines to fetch them.
-		$excluded = array_map( 'intval', (array) $this->core->get_option( 'sitemap_excluded_post_ids', [] ) );
-		if ( in_array( (int) $post->ID, $excluded, true ) ) return;
+		if ( $this->core->is_post_noindexed( $post->ID ) ) return;
 
 		$url = get_permalink( $post );
 		if ( !$url ) return;
