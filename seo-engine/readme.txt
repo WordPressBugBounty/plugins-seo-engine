@@ -4,7 +4,7 @@ Tags: seo, redirection, sitemap, schema, analytics
 Donate link: https://www.patreon.com/meowapps
 Requires at least: 6.0
 Tested up to: 7.1
-Stable tag: 0.9.5
+Stable tag: 0.9.6
 Requires PHP: 8.1
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
@@ -297,6 +297,12 @@ No. The Redirections & 404 module handles URL redirects (301, 302, 307, 308, 410
 Yes, and it is fully automatic. When you publish or update a post, SEO Engine instantly notifies Bing, Yandex, Naver and every IndexNow-compatible engine, so your content gets crawled right away instead of waiting. The verification key is generated and served for you; there is nothing to configure. Note that Google does not use IndexNow and keeps reading your sitemap instead.
 
 == Changelog ==
+
+= 0.9.6 (2026/10/03) =
+* Add: Support for the Divi button and blog blocks when parsing content for internal linking.
+* Update: Sitemap translations now work with both WPML and Polylang.
+* Fix: Polylang sitemaps now include all languages with the correct hreflang entries.
+* Fix: Duplicate title checks now only consider valid post types.
 
 = 0.9.5 (2026/09/26) =
 * Add: Hide or keep a post in search from the Content tab, which sets no index and removes it from the sitemap, with a bulk undo after hiding.

@@ -2125,6 +2125,11 @@ class Meow_MWSEO_Core
 		if ( $is_bogo ) {
 			$args['bogo_suppress_locale_query'] = true;
 		}
+		if ( $language === 'all' && function_exists( 'pll_get_post_language' ) ) {
+			// Without an explicit 'lang', Polylang narrows queries to its current
+			// language, which on post.php is the language of the post being edited.
+			$args['lang'] = '';
+		}
 		if ( empty( $language ) || $language === 'all' ) {
 			return $args;
 		}

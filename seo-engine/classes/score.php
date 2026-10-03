@@ -1171,6 +1171,11 @@ class Meow_MWSEO_Score {
 	private function test_title_unique( $post, $analysis ) {
 		global $wpdb;
 
+		// Only real content competes in search: skip menu items, builder layouts/templates, patterns, etc.
+		$types = get_post_types( array( 'public' => true ) );
+		unset( $types['attachment'] );
+		$types_sql = "'" . implode( "','", array_map( 'esc_sql', $types ) ) . "'";
+
 		// Check if Polylang is active and get the post's language
 		if ( function_exists( 'pll_get_post_language' ) ) {
 			$post_language = pll_get_post_language( $post->ID, 'slug' );
@@ -1186,6 +1191,7 @@ class Meow_MWSEO_Score {
 					WHERE p.post_title = %s
 					AND p.ID != %d
 					AND p.post_status = 'publish'
+					AND p.post_type IN ($types_sql)
 					AND tt.taxonomy = 'language'
 					AND t.slug = %s",
 					$analysis['title'], $post->ID, $post_language
@@ -1210,6 +1216,7 @@ class Meow_MWSEO_Score {
 					WHERE p.post_title = %s
 					AND p.ID != %d
 					AND p.post_status = 'publish'
+					AND p.post_type IN ($types_sql)
 					AND ( pm.meta_value = %s" . ( $missing_is_default ? " OR pm.meta_id IS NULL" : "" ) . " )",
 					$analysis['title'], $post->ID, $locale
 				) );
@@ -1219,7 +1226,7 @@ class Meow_MWSEO_Score {
 
 		// Fallback: check sitewide if no language plugin or post has no language
 		$count = $wpdb->get_var( $wpdb->prepare(
-			"SELECT COUNT(*) FROM $wpdb->posts WHERE post_title = %s AND ID != %d AND post_status = 'publish'",
+			"SELECT COUNT(*) FROM $wpdb->posts WHERE post_title = %s AND ID != %d AND post_status = 'publish' AND post_type IN ($types_sql)",
 			$analysis['title'], $post->ID
 		) );
 

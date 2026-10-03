@@ -115,12 +115,12 @@ class Meow_MWSEO_Sitemap extends WP_Sitemaps_Provider
   public function get_url_list( $page, $post_type = null )
   {
     $urls = [];
-    $posts = get_posts( [
+    $posts = get_posts( $this->core->apply_language_filter( [
       'post_type' => $post_type,
       'posts_per_page' => $this->core->get_option( 'sitemap_max_urls', 100 ),
       'paged' => $page,
       'fields' => 'ids',
-    ] );
+    ], 'all' ) );
 
     foreach ( $posts as $post_id ) {
       $urls[] = get_permalink( $post_id );
@@ -301,13 +301,15 @@ private function create_sitemap_for_post_type( $post_type, $excluded_posts = [] 
     $exlcude_posts_provider = $this->core->get_option( 'sitemap_exclude_posts_provider', false );
     if ( $exlcude_posts_provider ) return false;
 
-    $posts = get_posts([
+    // A sitemap covers every language, whatever the request's current one is
+    // (Polylang sets it to the saved post's language on post.php).
+    $posts = get_posts( $this->core->apply_language_filter( [
         'post_type'      => $post_type,
         'post__not_in'   => $excluded_posts,
         'orderby'        => 'modified',
         'order'          => 'DESC',
         'posts_per_page' =>  $this->core->get_option( 'sitemap_max_urls', 100 ),
-    ]);
+    ], 'all' ) );
 
     // If no posts found, maybe skip generating a file
     if ( empty( $posts ) ) {
@@ -317,7 +319,7 @@ private function create_sitemap_for_post_type( $post_type, $excluded_posts = [] 
     // Build sub-sitemap XML
     $xml  = '<?xml version="1.0" encoding="UTF-8"?>' . "\n";
     $xml .= '<?xml-stylesheet type="text/xsl" href="' . MWSEO_URL . 'classes/sitemap-style' . $this->style  . '.xsl"?>' . "\n";
-    $xml .= '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">' . "\n";
+    $xml .= '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9" xmlns:xhtml="http://www.w3.org/1999/xhtml">' . "\n";
 
     foreach ( $posts as $post ) {
         setup_postdata( $post );
@@ -329,6 +331,13 @@ private function create_sitemap_for_post_type( $post_type, $excluded_posts = [] 
         $xml .= "    <lastmod>" . esc_html( $lastmod_iso8601 ) . "</lastmod>\n";
         $xml .= "    <changefreq>daily</changefreq>\n";
         $xml .= "    <priority>1.0</priority>\n";
+        $urls = [];
+        foreach ( $this->get_translations( $post->ID, $post_type, false ) as $lang => $id ) {
+            if ( get_post_status( $id ) === 'publish' && ! in_array( (int) $id, $excluded_posts, true ) ) {
+                $urls[ $lang ] = get_permalink( $id );
+            }
+        }
+        $xml .= $this->hreflang_links( $urls );
         $xml .= "  </url>\n";
     }
 
@@ -352,11 +361,21 @@ private function create_sitemap_for_taxonomy( $taxonomy ) {
     $exclude_taxonomies_provider = $this->core->get_option( 'sitemap_exclude_taxonomies_provider', false );
     if ( $exclude_taxonomies_provider ) return false;
 
+    // WPML narrows get_terms() to its current language; the sitemap needs them all.
+    $wpml_lang = apply_filters( 'wpml_current_language', null );
+    if ( $wpml_lang ) {
+        do_action( 'wpml_switch_language', 'all' );
+    }
+
     // Get all public terms in the taxonomy
-    $terms = get_terms([
+    $terms = get_terms( $this->core->apply_language_filter( [
         'taxonomy'   => $taxonomy,
         'hide_empty' => false,
-    ]);
+    ], 'all' ) );
+
+    if ( $wpml_lang ) {
+        do_action( 'wpml_switch_language', $wpml_lang );
+    }
 
     if ( empty( $terms ) || is_wp_error( $terms ) ) {
         return false;
@@ -364,7 +383,7 @@ private function create_sitemap_for_taxonomy( $taxonomy ) {
 
     $xml  = '<?xml version="1.0" encoding="UTF-8"?>' . "\n";
     $xml .= '<?xml-stylesheet type="text/xsl" href="' . MWSEO_URL . 'classes/sitemap-style' . $this->style  . '.xsl"?>' . "\n";
-    $xml .= '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">' . "\n";
+    $xml .= '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9" xmlns:xhtml="http://www.w3.org/1999/xhtml">' . "\n";
 
     foreach ( $terms as $term ) {
         // The link to a term archive page
@@ -377,6 +396,14 @@ private function create_sitemap_for_taxonomy( $taxonomy ) {
         $xml .= "    <loc>" . esc_url( $term_link ) . "</loc>\n";
         $xml .= "    <changefreq>daily</changefreq>\n";
         $xml .= "    <priority>0.8</priority>\n";
+        $urls = [];
+        foreach ( $this->get_translations( $term->term_id, $taxonomy, true ) as $lang => $id ) {
+            $link = get_term_link( (int) $id, $taxonomy );
+            if ( ! is_wp_error( $link ) ) {
+                $urls[ $lang ] = $link;
+            }
+        }
+        $xml .= $this->hreflang_links( $urls );
         $xml .= "  </url>\n";
     }
 
@@ -390,6 +417,39 @@ private function create_sitemap_for_taxonomy( $taxonomy ) {
         'filename' => $filename,
         'filepath' => realpath( $filepath ),
     ];
+}
+
+// Translations of a post or term (itself included) as [ language slug => id ],
+// from Polylang or WPML. Empty when neither is active.
+private function get_translations( $id, $type, $is_term ) {
+    if ( function_exists( 'pll_get_post_translations' ) ) {
+        return $is_term ? pll_get_term_translations( $id ) : pll_get_post_translations( $id );
+    }
+    $ids = [];
+    foreach ( array_keys( (array) apply_filters( 'wpml_active_languages', null, [ 'skip_missing' => 0 ] ) ) as $lang ) {
+        $translated = apply_filters( 'wpml_object_id', $id, $type, false, $lang );
+        if ( $translated ) {
+            $ids[ $lang ] = $translated;
+        }
+    }
+    return $ids;
+}
+
+// Translations as <xhtml:link> alternates, keyed by language slug.
+// The list includes the URL itself, as Google requires.
+private function hreflang_links( $urls ) {
+    if ( count( $urls ) < 2 ) {
+        return '';
+    }
+    $codes = function_exists( 'pll_languages_list' )
+        ? array_combine( pll_languages_list(), pll_languages_list( [ 'fields' => 'w3c' ] ) )
+        : array_column( (array) apply_filters( 'wpml_active_languages', null, [ 'skip_missing' => 0 ] ), 'tag', 'code' );
+    $xml = '';
+    foreach ( $urls as $lang => $url ) {
+        $code = $codes[ $lang ] ?? $lang;
+        $xml .= '    <xhtml:link rel="alternate" hreflang="' . esc_attr( $code ) . '" href="' . esc_url( $url ) . '" />' . "\n";
+    }
+    return $xml;
 }
 
 private function create_sitemap_for_users() {
