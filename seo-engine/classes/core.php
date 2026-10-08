@@ -28,6 +28,7 @@ class Meow_MWSEO_Core
 	private $parsers = null;
 	public $redirects_module = null;
 	public $indexnow_module = null;
+	public $breadcrumbs_module = null;
 
 	public function __construct() {
 		global $mwseo_core;
@@ -124,6 +125,9 @@ class Meow_MWSEO_Core
 		if ( class_exists( 'Meow_MWSEO_Modules_Schema' ) ) {
 			$this->schema_module = new Meow_MWSEO_Modules_Schema( $this );
 		}
+
+		// Breadcrumbs (primary category, BreadcrumbList schema, shortcode)
+		$this->breadcrumbs_module = new Meow_MWSEO_Modules_Breadcrumbs( $this );
 
 		// Analytics
 		if ( class_exists( 'Meow_MWSEO_Modules_Analytics' ) ) {
@@ -708,7 +712,7 @@ class Meow_MWSEO_Core
 		}
 		$title = trim( strip_tags( $title ) );
 		if ( !$override ) {
-			$title = $title . " | " . trim( get_bloginfo( 'name' ) );
+			$title = $title . ' ' . $this->get_title_separator() . ' ' . trim( get_bloginfo( 'name' ) );
 		}
 		$title = html_entity_decode( $title );
 		return $title;
@@ -1341,6 +1345,7 @@ class Meow_MWSEO_Core
 			'check_missing_alt_text' => true,
 			'check_orphaned_content' => true,
 			'auto_schema_enabled' => false,
+			'title_separator' => '|',
 
 			// Length Guidelines
 			'title_length_min' => 30,
@@ -1811,6 +1816,11 @@ class Meow_MWSEO_Core
 		$text = preg_replace( '/(\s*' . $q . '\s*){2,}/u', ' ' . $sep . ' ', $text );
 		$text = preg_replace( '/^(\s*' . $q . '\s*)+|(\s*' . $q . '\s*)+$/u', '', $text );
 		return trim( $text );
+	}
+
+	function get_title_separator() {
+		$separator = trim( mb_substr( wp_strip_all_tags( (string) $this->get_option( 'title_separator', '|' ) ), 0, 5 ) );
+		return apply_filters( 'mwseo_title_separator', $separator !== '' ? $separator : '|' );
 	}
 
 	function get_seo_title( $post ) {

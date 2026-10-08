@@ -4,7 +4,7 @@ Tags: seo, redirection, sitemap, schema, analytics
 Donate link: https://www.patreon.com/meowapps
 Requires at least: 6.0
 Tested up to: 7.1
-Stable tag: 0.9.6
+Stable tag: 0.9.7
 Requires PHP: 8.1
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
@@ -297,6 +297,15 @@ No. The Redirections & 404 module handles URL redirects (301, 302, 307, 308, 410
 Yes, and it is fully automatic. When you publish or update a post, SEO Engine instantly notifies Bing, Yandex, Naver and every IndexNow-compatible engine, so your content gets crawled right away instead of waiting. The verification key is generated and served for you; there is nothing to configure. Note that Google does not use IndexNow and keeps reading your sitemap instead.
 
 == Changelog ==
+
+= 0.9.7 (2026/10/08) =
+* Add: Title separator setting to control the character between the title and the site name.
+* Add: Primary category selection for posts with multiple categories.
+* Add: BreadcrumbList schema output and a breadcrumbs shortcode.
+* Add: Last 20 years range to the Analytics dashboard.
+* Add: SEO tag next to post titles that were edited in Quick Edit SEO.
+* Fix: AI Overview suspects in the Search Console quick wins.
+* Fix: Low CTR metric showing up empty in Search Console.
 
 = 0.9.6 (2026/10/03) =
 * Add: Support for the Divi button and blog blocks when parsing content for internal linking.
