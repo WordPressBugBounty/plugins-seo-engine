@@ -703,13 +703,10 @@ class Meow_MWSEO_Rest
 
 	function rest_settings_list() {
 
-		// Actually refresh dynamic options (related to Wordpress' settings).
-		$this->core->sanitized_options();
-
-
 		return new WP_REST_Response( [
 			'success' => true,
-			'options' => $this->core->get_all_options()
+			// Includes the dynamic lists (terms, archive post types) the UI needs.
+			'options' => $this->core->sanitized_options()
 		], 200 );
 	}
 
@@ -846,9 +843,10 @@ class Meow_MWSEO_Rest
 				$category_slug = $category->slug;
 				$category_count = $category->count;
 
-				// Get some posts from this category for context
+				// Get some posts from this term for context
 				$posts = get_posts( [
-					'category' => $category_id,
+					'post_type' => 'any',
+					'tax_query' => [ [ 'taxonomy' => $category->taxonomy, 'terms' => $category_id ] ],
 					'numberposts' => 5,
 					'post_status' => 'publish',
 				] );
@@ -856,7 +854,9 @@ class Meow_MWSEO_Rest
 					return $post->post_title;
 				}, $posts );
 
-				$instructions = "Generate SEO metadata for a WordPress category page. Provide a compelling SEO title (max 60 characters) and SEO description (max 160 characters) that will appear in search engine results.\n\n";
+				$taxonomy = get_taxonomy( $category->taxonomy );
+				$taxonomy_label = $taxonomy ? $taxonomy->labels->singular_name : 'Category';
+				$instructions = "Generate SEO metadata for a WordPress {$taxonomy_label} archive page. Provide a compelling SEO title (max 60 characters) and SEO description (max 160 characters) that will appear in search engine results.\n\n";
 				$instructions .= "Website: {$site_name}\n";
 				$instructions .= "Website description: {$site_description}\n\n";
 				$instructions .= "Category name: {$category_name}\n";
@@ -935,6 +935,59 @@ class Meow_MWSEO_Rest
 		], 200);
 	}
 
+	// The candidates no other published content links to. Links are matched by their last
+	// path segment against the post slug (works for any permalink structure) or by ?p= /
+	// page_id= ids. Self-links don't count.
+	// ponytail: a full content scan per call, cache it in a transient if big sites feel it.
+	private function get_orphan_ids( $candidate_ids ) {
+		global $wpdb;
+		if ( empty( $candidate_ids ) ) return [];
+		$home_host = wp_parse_url( home_url(), PHP_URL_HOST );
+		$linked = []; // slug or #id => source id, or -1 once linked from two different sources
+		$mark = function( $key, $src ) use ( &$linked ) {
+			if ( !isset( $linked[ $key ] ) ) $linked[ $key ] = $src;
+			else if ( $linked[ $key ] !== $src ) $linked[ $key ] = -1;
+		};
+		$last_id = 0;
+		do {
+			$rows = $wpdb->get_results( $wpdb->prepare(
+				"SELECT ID, post_content FROM {$wpdb->posts}
+				WHERE post_status = 'publish' AND ID > %d AND post_content LIKE '%%href%%'
+				ORDER BY ID LIMIT 500", $last_id
+			), ARRAY_A );
+			foreach ( (array) $rows as $r ) {
+				$src = $last_id = (int) $r['ID'];
+				if ( !preg_match_all( '/href\s*=\s*["\']([^"\']+)["\']/i', $r['post_content'], $m ) ) continue;
+				foreach ( $m[1] as $href ) {
+					$url = wp_parse_url( html_entity_decode( $href ) );
+					if ( !$url || ( !empty( $url['host'] ) && strcasecmp( $url['host'], $home_host ) !== 0 ) ) continue;
+					if ( !empty( $url['query'] ) && preg_match( '/(?:^|&)(?:p|page_id)=(\d+)/', $url['query'], $q ) ) {
+						$mark( '#' . (int) $q[1], $src );
+					}
+					$segments = array_filter( explode( '/', isset( $url['path'] ) ? $url['path'] : '' ) );
+					if ( $segments ) $mark( strtolower( urldecode( end( $segments ) ) ), $src );
+				}
+			}
+		} while ( count( (array) $rows ) === 500 );
+
+		$front_id = (int) get_option( 'page_on_front' );
+		$orphans = [];
+		foreach ( array_chunk( $candidate_ids, 5000 ) as $chunk ) {
+			$in = implode( ',', array_map( 'intval', $chunk ) );
+			$rows = $wpdb->get_results( "SELECT ID, post_name FROM {$wpdb->posts} WHERE ID IN ($in)", ARRAY_A );
+			foreach ( (array) $rows as $r ) {
+				$pid = (int) $r['ID'];
+				if ( $pid === $front_id ) continue; // Linked as the bare home URL.
+				$slug = strtolower( urldecode( $r['post_name'] ) );
+				$by_slug = $slug !== '' && isset( $linked[ $slug ] ) ? $linked[ $slug ] : null;
+				$by_id = isset( $linked[ '#' . $pid ] ) ? $linked[ '#' . $pid ] : null;
+				$linked_from_other = ( $by_slug !== null && $by_slug !== $pid ) || ( $by_id !== null && $by_id !== $pid );
+				if ( !$linked_from_other ) $orphans[] = $pid;
+			}
+		}
+		return $orphans;
+	}
+
 	function rest_posts($request) {
 		// The old implementation hydrated the whole library (full posts + all meta) before
 		// slicing one page out: ~110MB for 61 pages, an OOM crash on 128M hosts. It now
@@ -974,7 +1027,9 @@ class Meow_MWSEO_Rest
 		// Opportunity views are metric-based (Search Console), not status-based: they see
 		// every non-skipped post and get filtered after the rows are enriched below.
 		$opportunity = in_array( $filter, ['quick_wins', 'low_ctr', 'invisible'], true ) ? $filter : null;
-		$show_all = $filter == 'all' || $opportunity !== null;
+		// Content gap views work the same way: every non-skipped post, narrowed down below.
+		$gap = in_array( $filter, ['no_title', 'no_excerpt', 'orphan'], true ) ? $filter : null;
+		$show_all = $filter == 'all' || $opportunity !== null || $gap !== null;
 		$filter = $show_all ? null : $filter;
 
 		// Get language filter. An explicit 'all' from the client means every language; only
@@ -1138,6 +1193,31 @@ class Meow_MWSEO_Rest
 			}
 		}
 
+		// ---- Content gaps: posts without a custom SEO title / description, and orphans ----
+		// Title/description presence is one cheap meta query, so those counts are always on.
+		$has_title = [];
+		$has_excerpt = [];
+		foreach ( array_chunk( $post_ids, 5000 ) as $chunk ) {
+			$in = implode( ',', $chunk );
+			$rows = $wpdb->get_results( $wpdb->prepare(
+				"SELECT DISTINCT post_id, meta_key FROM {$wpdb->postmeta}
+				WHERE post_id IN ($in) AND meta_key IN (%s, %s) AND TRIM(meta_value) != ''",
+				$this->core->meta_key_seo_title, $this->core->meta_key_seo_excerpt
+			), ARRAY_A );
+			foreach ( (array) $rows as $r ) {
+				if ( $r['meta_key'] === $this->core->meta_key_seo_title ) $has_title[ (int) $r['post_id'] ] = true;
+				else $has_excerpt[ (int) $r['post_id'] ] = true;
+			}
+		}
+		// Orphans need a scan of every published content, so only when that view is active.
+		$orphan_lookup = $gap === 'orphan' ? array_flip( $this->get_orphan_ids( $post_ids ) ) : null;
+		$gap_match = function( $view, $pid ) use ( $has_title, $has_excerpt, &$orphan_lookup ) {
+			if ( $view === 'no_title' ) return !isset( $has_title[ $pid ] );
+			if ( $view === 'no_excerpt' ) return !isset( $has_excerpt[ $pid ] );
+			return isset( $orphan_lookup[ $pid ] );
+		};
+		$gap_counts = [ 'no_title' => 0, 'no_excerpt' => 0, 'orphan' => $orphan_lookup !== null ? 0 : null ];
+
 		// ---- Audience metrics (Search Console) ----
 		// cached_only: the list never blocks on a cold GSC round trip; a live call is only
 		// allowed when the user explicitly picks a metric sort or an opportunity view.
@@ -1183,8 +1263,15 @@ class Meow_MWSEO_Rest
 				}
 			}
 
+			if ( $post_status_view !== 'skip' ) {
+				foreach ( $gap_counts as $view => $count ) {
+					if ( $count !== null && $gap_match( $view, $pid ) ) $gap_counts[ $view ]++;
+				}
+			}
+
 			// Apply filter (All excludes skip)
 			if ( $show_all && $post_status_view === 'skip' ) continue;
+			if ( $gap !== null && !$gap_match( $gap, $pid ) ) continue;
 			if ( $filter && $post_status_view !== $filter ) continue;
 			if ( $opportunity !== null && !$opportunity_match( $opportunity, $gsc_row, $no_index ) ) continue;
 
@@ -1246,6 +1333,9 @@ class Meow_MWSEO_Rest
 			'invisible' => $opportunity_counts['invisible'],
 			'quick_wins_potential' => (int) $quick_wins_potential,
 		] : null;
+
+		// Library-wide content gap counts (orphan is null unless that view is active).
+		$total_counts['gaps'] = $gap_counts;
 
 		// The real result count after every filter (status, search, opportunity views), so the
 		// pagination reflects what the user is actually looking at, not the whole library.
@@ -2442,6 +2532,9 @@ class Meow_MWSEO_Rest
 					break;
 				case 'yoast':
 					$status = $this->core->import_yoast();
+					break;
+				case 'seopress':
+					$status = $this->core->import_seopress();
 					break;
 				default:
 					return new WP_REST_Response([

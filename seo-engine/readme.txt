@@ -4,7 +4,7 @@ Tags: seo, redirection, sitemap, schema, analytics
 Donate link: https://www.patreon.com/meowapps
 Requires at least: 6.0
 Tested up to: 7.1
-Stable tag: 0.9.7
+Stable tag: 0.9.8
 Requires PHP: 8.1
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
@@ -297,6 +297,19 @@ No. The Redirections & 404 module handles URL redirects (301, 302, 307, 308, 410
 Yes, and it is fully automatic. When you publish or update a post, SEO Engine instantly notifies Bing, Yandex, Naver and every IndexNow-compatible engine, so your content gets crawled right away instead of waiting. The verification key is generated and served for you; there is nothing to configure. Note that Google does not use IndexNow and keeps reading your sitemap instead.
 
 == Changelog ==
+
+= 0.9.8 (2026/10/19) =
+* Add: SEO Engine panel in the block editor to edit the SEO title and description.
+* Add: Tags, custom taxonomies and post type archives can now have their own SEO title and description.
+* Add: Import SEO data from SEOPress.
+* Add: New filters in SEO Content for missing SEO description, missing SEO title and orphan posts.
+* Update: Filters are now next to the sorts in the SEO Content tab.
+* Update: The Free badge and logo in the plugin header now link to the Pro page.
+* Fix: The homepage title and description now use the site name and tagline when the homepage shows the latest posts, instead of the newest post's.
+* Fix: No trailing separator is added to the title when the site name is empty.
+* 🎵 Discuss with others about Seo Engine on [the Discord](https://discord.gg/bHDGh38).
+* 🌴 Keep us motivated with [a little review here](https://wordpress.org/support/plugin/seo-engine/reviews/). Thank you!
+* 🥰 If you want to help us, check our [Patreon](https://www.patreon.com/meowapps). Thank you!
 
 = 0.9.7 (2026/10/08) =
 * Add: Title separator setting to control the character between the title and the site name.

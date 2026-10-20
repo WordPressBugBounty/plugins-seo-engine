@@ -156,7 +156,7 @@ class Meow_MWSEO_Admin extends MeowKit_MWSEO_Admin {
 				'yoast'      => class_exists( 'WPSEO_Frontend' ),
 				'all_in_one' => class_exists( 'All_in_One_SEO_Pack' ),
 				'rank_math'  => class_exists( 'RankMath' ),
-				'seopress'   => class_exists( 'SEOPress' ),
+				'seopress'   => defined( 'SEOPRESS_VERSION' ),
 			]
 		];
 

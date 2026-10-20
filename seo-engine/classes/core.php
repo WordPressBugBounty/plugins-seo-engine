@@ -129,6 +129,9 @@ class Meow_MWSEO_Core
 		// Breadcrumbs (primary category, BreadcrumbList schema, shortcode)
 		$this->breadcrumbs_module = new Meow_MWSEO_Modules_Breadcrumbs( $this );
 
+		// SEO panel in the block editor (title, description, index status)
+		new Meow_MWSEO_Modules_EditorPanel( $this );
+
 		// Analytics
 		if ( class_exists( 'Meow_MWSEO_Modules_Analytics' ) ) {
 			$this->analytics_module = new Meow_MWSEO_Modules_Analytics( $this );
@@ -334,7 +337,8 @@ class Meow_MWSEO_Core
 
 	function get_categories() {
 		
-		$taxonomy = apply_filters( 'mwseo_category_taxonomies', array( 'category', 'product_cat' ) );
+		// Every public taxonomy (categories, tags, product categories, custom ones) can have its own SEO title and description.
+		$taxonomy = apply_filters( 'mwseo_category_taxonomies', array_keys( $this->get_taxonomies() ) );
 
 		$categories = get_categories( array(
 			'taxonomy' => $taxonomy,
@@ -361,7 +365,8 @@ class Meow_MWSEO_Core
 	function make_category_list( $categories ) {
 		$list = [];
 		foreach ( $categories as $category ) {
-			$list[$category->term_id] = $category;
+			$taxonomy = get_taxonomy( $category->taxonomy );
+			$list[$category->term_id] = (array) $category + [ 'taxonomy_label' => $taxonomy ? $taxonomy->labels->singular_name : $category->taxonomy ];
 		}
 		return array_values( $list );
 	}
@@ -630,18 +635,11 @@ class Meow_MWSEO_Core
 
 	
 
-	function build_excerpt( $post, $excerpt = "" ) {
-		if ( is_category() ) {
-			$category = get_queried_object();
-			if ( $category && !empty( $category->term_id ) ) {
-				$seo_description = get_term_meta( $category->term_id, '_mwseo_description', true );
-				$excerpt = !empty( $seo_description ) ? $seo_description : category_description();
-			} else {
-				$excerpt = category_description();
-			}
-		}
-		else if ( is_tag() ) {
-			$excerpt = tag_description();
+	function build_excerpt( $post, $excerpt = "", $ignore_custom = false ) {
+		if ( is_category() || is_tag() || is_tax() ) {
+			$term = get_queried_object();
+			$seo_description = $term instanceof WP_Term ? get_term_meta( $term->term_id, '_mwseo_description', true ) : '';
+			$excerpt = !empty( $seo_description ) ? $seo_description : term_description();
 		}
 		else if ( is_author() ) {
 			$excerpt = get_the_author_meta( 'description' );
@@ -653,37 +651,44 @@ class Meow_MWSEO_Core
 			$excerpt = '404';
 		}
 		else if ( is_home() ) {
-			$excerpt = get_the_excerpt( get_option( 'page_for_posts' ) );
+			$page_for_posts = (int) get_option( 'page_for_posts' );
+			// Latest posts on the front page have no page of their own: get_the_excerpt( 0 ) returned the newest post's.
+			$excerpt = $page_for_posts ? get_the_excerpt( $page_for_posts ) : get_bloginfo( 'description' );
+		}
+		else if ( is_post_type_archive() ) {
+			$seo_description = $this->get_archive_seo( 'description' );
+			$excerpt = $seo_description !== '' ? $seo_description : get_the_archive_description();
 		}
 		else if ( is_archive() ) {
 			$excerpt = get_the_archive_description();
 		}
 		else if ( !empty( $post ) ) {
-			$seo_excerpt = get_post_meta( $post->ID, $this->meta_key_seo_excerpt, true );
+			$seo_excerpt = $ignore_custom ? '' : get_post_meta( $post->ID, $this->meta_key_seo_excerpt, true );
 			$excerpt = !empty( $seo_excerpt ) ? $seo_excerpt : get_the_excerpt( $post->ID );
 		}
 		$excerpt = html_entity_decode( $excerpt );
 		return $excerpt;
 	}
 
-	function build_title( $post, $title = "" ) {
+	// SEO title or description set for the current post type archive (like /projects/), in the archive_seo option.
+	function get_archive_seo( $field ) {
+		$post_type = get_query_var( 'post_type' );
+		$post_type = is_array( $post_type ) ? reset( $post_type ) : $post_type;
+		$archive_seo = (array) $this->get_option( 'archive_seo', [] );
+		return trim( (string) ( $archive_seo[$post_type][$field] ?? '' ) );
+	}
+
+	function build_title( $post, $title = "", $ignore_custom = false ) {
 		$override = false;
-		if ( is_category() ) {
-			$category = get_queried_object();
-			if ( $category && !empty( $category->term_id ) ) {
-				$seo_title = get_term_meta( $category->term_id, '_mwseo_title', true );
-				if ( !empty( $seo_title ) ) {
-					$override = true;
-					$title = $seo_title;
-				} else {
-					$title = single_cat_title( '', false );
-				}
+		if ( is_category() || is_tag() || is_tax() ) {
+			$term = get_queried_object();
+			$seo_title = $term instanceof WP_Term ? get_term_meta( $term->term_id, '_mwseo_title', true ) : '';
+			if ( !empty( $seo_title ) ) {
+				$override = true;
+				$title = $seo_title;
 			} else {
-				$title = single_cat_title( '', false );
+				$title = single_term_title( '', false );
 			}
-		}
-		else if ( is_tag() ) {
-			$title = single_tag_title( '', false );
 		}
 		else if ( is_author() ) {
 			$title = get_the_author();
@@ -695,13 +700,32 @@ class Meow_MWSEO_Core
 			$title = '404';
 		}
 		else if ( is_home() ) {
-			$title = get_the_title( get_option( 'page_for_posts' ) );
+			$page_for_posts = (int) get_option( 'page_for_posts' );
+			if ( $page_for_posts ) {
+				$title = get_the_title( $page_for_posts );
+			}
+			else {
+				// Latest posts on the front page have no page of their own: get_the_title( 0 ) returned
+				// the newest post's title. Site name and tagline instead, skipping whichever is empty.
+				$override = true;
+				$parts = array_filter( array( trim( get_bloginfo( 'name' ) ), trim( get_bloginfo( 'description' ) ) ), 'strlen' );
+				$title = implode( ' ' . $this->get_title_separator() . ' ', $parts );
+			}
+		}
+		else if ( is_post_type_archive() ) {
+			$seo_title = $this->get_archive_seo( 'title' );
+			if ( $seo_title !== '' ) {
+				$override = true;
+				$title = $seo_title;
+			} else {
+				$title = post_type_archive_title( '', false );
+			}
 		}
 		else if ( is_archive() ) {
 			$title = get_the_archive_title();
 		}
 		else if ( !empty( $post ) ) {
-			$seo_title = get_post_meta( $post->ID, $this->meta_key_seo_title, true );
+			$seo_title = $ignore_custom ? '' : get_post_meta( $post->ID, $this->meta_key_seo_title, true );
 			if ( !empty( $seo_title ) ) {
 				$override = true;
 				$title = $seo_title;
@@ -711,8 +735,9 @@ class Meow_MWSEO_Core
 			}
 		}
 		$title = trim( strip_tags( $title ) );
-		if ( !$override ) {
-			$title = $title . ' ' . $this->get_title_separator() . ' ' . trim( get_bloginfo( 'name' ) );
+		$site = trim( get_bloginfo( 'name' ) );
+		if ( !$override && $site !== '' ) {
+			$title = $title . ' ' . $this->get_title_separator() . ' ' . $site;
 		}
 		$title = html_entity_decode( $title );
 		return $title;
@@ -723,7 +748,7 @@ class Meow_MWSEO_Core
 		return class_exists( 'WPSEO_Frontend' )       // Yoast SEO
 			|| class_exists( 'All_in_One_SEO_Pack' )  // All in One SEO
 			|| class_exists( 'RankMath' )             // Rank Math
-			|| class_exists( 'SEOPress' );            // SEOPress
+			|| defined( 'SEOPRESS_VERSION' );         // SEOPress
 	}
 
 	// Whether SEO Engine should output its own frontend meta tags (title, description,
@@ -1133,6 +1158,7 @@ class Meow_MWSEO_Core
 
 		$options['post_types'] = $this->make_post_type_list( $this->get_post_types() );
 		$options['categories'] = $this->make_category_list( $this->get_categories() );
+		$options['archive_post_types'] = $this->make_post_type_list( get_post_types( array( 'public' => true, 'has_archive' => true ) ) );
 
 		if ( $options['language'] == 'auto' || empty( $options['language'] ) ) {
 			$options['language'] = $this->get_language_name( get_locale() ) ?? 'English';
@@ -1223,7 +1249,7 @@ class Meow_MWSEO_Core
 			'sitemap_max_urls' => 100,
 			'sitemap_post_max_pages' => 100,
 			'taxonomies' => $this->make_taxonomy_list( $this->get_taxonomies() ),
-			'categories' => $this->make_category_list( $this->get_categories() ),
+			'archive_seo' => [],
 			'robot_editor' => false,
 			'disallow_gpt_bot' => false,
 			
@@ -1477,6 +1503,8 @@ class Meow_MWSEO_Core
 	}
 
 	function update_options( $options ) {
+		// Computed lists for the UI, not settings.
+		unset( $options['categories'], $options['archive_post_types'] );
 		if ( $options == get_option( $this->option_name ) ) {
 			return $options;
 		}
@@ -1767,7 +1795,7 @@ class Meow_MWSEO_Core
 	 * Resolve the common variables into plain text; unknown ones are dropped.
 	 * ponytail: resolved once at import, so a later post rename won't update an imported title.
 	 */
-	function yoast_replace_vars( $text, $post ) {
+	function yoast_replace_vars( $text, $post, $sep = null, $extra = [] ) {
 		$text = (string) $text;
 		if ( strpos( $text, '%%' ) === false ) return $text;
 
@@ -1775,7 +1803,7 @@ class Meow_MWSEO_Core
 			'sc-bull' => '•', 'sc-star' => '*', 'sc-smstar' => '⋆', 'sc-pipe' => '|', 'sc-tilde' => '~',
 			'sc-laquo' => '«', 'sc-raquo' => '»', 'sc-lt' => '<', 'sc-gt' => '>' ];
 		$yoast_titles = get_option( 'wpseo_titles', [] );
-		$sep = $seps[ $yoast_titles['separator'] ?? 'sc-dash' ] ?? '-';
+		$sep = $sep ?? ( $seps[ $yoast_titles['separator'] ?? 'sc-dash' ] ?? '-' );
 
 		$primary_cat = '';
 		$cat_id = (int) get_post_meta( $post->ID, '_yoast_wpseo_primary_category', true );
@@ -1804,7 +1832,7 @@ class Meow_MWSEO_Core
 			'currentmonth'     => date_i18n( 'F' ),
 			'currentday'       => date_i18n( 'j' ),
 			'currentdate'      => date_i18n( get_option( 'date_format' ) ),
-		];
+		] + $extra;
 		$text = preg_replace_callback( '/%%([a-z0-9_]+)%%/i', function( $m ) use ( $vars ) {
 			$key = strtolower( $m[1] );
 			return isset( $vars[ $key ] ) ? (string) $vars[ $key ] : '';
@@ -1959,6 +1987,63 @@ class Meow_MWSEO_Core
 		return array(
 			'posts' => count( $posts ),
 			'redirects' => $redirects,
+		);
+	}
+
+	function import_seopress() {
+		$post_types = $this->get_option( 'select_post_types', array( 'post' ) );
+		$posts = get_posts( array(
+			'post_type' => $post_types,
+			'posts_per_page' => -1,
+			'meta_query' => array(
+				'relation' => 'OR',
+				array(
+					'key' => '_seopress_titles_title',
+					'compare' => 'EXISTS',
+				),
+				array(
+					'key' => '_seopress_titles_desc',
+					'compare' => 'EXISTS',
+				),
+			),
+		) );
+
+		// SEOPress uses the same %%var%% templates as Yoast, with its own separator and a few renamed vars.
+		$titles = get_option( 'seopress_titles', [] );
+		$sep = !empty( $titles['seopress_titles_sep'] ) ? html_entity_decode( $titles['seopress_titles_sep'] ) : '-';
+
+		foreach ( $posts as $post ) {
+			$keywords = get_post_meta( $post->ID, '_seopress_analysis_target_kw', true );
+			$extra = [
+				'post_title'         => $post->post_title,
+				'sitetitle'          => get_bloginfo( 'name' ),
+				'tagline'            => get_bloginfo( 'description' ),
+				'post_excerpt'       => $post->post_excerpt,
+				'post_category'      => implode( ', ', wp_list_pluck( get_the_category( $post->ID ) ?: [], 'name' ) ),
+				'post_tag'           => implode( ', ', wp_list_pluck( get_the_tags( $post->ID ) ?: [], 'name' ) ),
+				'post_date'          => get_the_date( '', $post ),
+				'post_modified_date' => get_the_modified_date( '', $post ),
+				'post_author'        => get_the_author_meta( 'display_name', $post->post_author ),
+				'target_keyword'     => $keywords,
+			];
+			$title = $this->yoast_replace_vars( get_post_meta( $post->ID, '_seopress_titles_title', true ), $post, $sep, $extra );
+			$excerpt = $this->yoast_replace_vars( get_post_meta( $post->ID, '_seopress_titles_desc', true ), $post, $sep, $extra );
+
+			if ( !empty( $title ) ) {
+				update_post_meta( $post->ID, $this->meta_key_seo_title, $title );
+			}
+			if ( !empty( $excerpt ) ) {
+				update_post_meta( $post->ID, $this->meta_key_seo_excerpt, $excerpt );
+			}
+			if ( !empty( $keywords ) ) {
+				$keywords = array_slice( array_map( 'trim', explode( ',', $keywords ) ), 0, 5 );
+				update_post_meta( $post->ID, $this->meta_key_seo_keywords, $keywords );
+			}
+		}
+
+		return array(
+			'posts' => count( $posts ),
+			'redirects' => 0,
 		);
 	}
 
