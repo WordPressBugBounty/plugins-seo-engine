@@ -1603,7 +1603,8 @@ class Meow_MWSEO_Rest
 		}
 
 		// Update the AI keywords.
-		$ai_keywords = $params['ai_keywords'] == '' ? null : explode(' ', $params['ai_keywords'] );
+		$ai_keywords = array_slice( array_values( array_filter( array_map( 'trim', explode( ',', $params['ai_keywords'] ?? '' ) ) ) ), 0, 5 );
+		$ai_keywords = empty( $ai_keywords ) ? null : $ai_keywords;
 		$this->update_or_delete_post_meta( $post_id, '_mwseo_keywords', $ai_keywords );
 
 
@@ -2394,108 +2395,12 @@ class Meow_MWSEO_Rest
 	}
 
 	function rest_generate_daily_insight( $request ) {
-		try {
-			// Check if AI Engine is available
-			if ( !class_exists( 'Meow_MWAI_Core' ) ) {
-				return $this->error_response( 'AI Engine is not available.', 'ai_engine_unavailable', 503 );
-			}
-
-			global $mwai;
-
-			// Get the 20 posts with worst scores
-			$args = array(
-				'post_type' => $this->core->get_option( 'select_post_types', ['post'] ),
-				'posts_per_page' => 20,
-				'orderby' => 'meta_value_num',
-				'order' => 'ASC',
-				'meta_key' => '_mwseo_score',
-				'meta_query' => array(
-					array(
-						'key' => '_mwseo_score',
-						'compare' => 'EXISTS'
-					),
-					array(
-						'key' => '_mwseo_score',
-						'value' => 0,
-						'compare' => '>=',
-						'type' => 'NUMERIC'
-					)
-				)
-			);
-
-			$posts = get_posts( $args );
-
-			if ( empty( $posts ) ) {
-				return $this->error_response( 'No analyzed posts found.', 'no_posts', 404 );
-			}
-
-			// Prime meta cache
-			$post_ids = wp_list_pluck( $posts, 'ID' );
-			update_meta_cache( 'post', $post_ids );
-
-			// Build data for AI
-			$posts_data = [];
-			foreach ( $posts as $post ) {
-				$score = get_post_meta( $post->ID, '_mwseo_score', true );
-				$codes = get_post_meta( $post->ID, '_mwseo_codes', true );
-				$edit_link = get_edit_post_link( $post->ID, 'raw' );
-
-				// Format issue codes to be human-readable
-				$issues = [];
-				if ( is_array( $codes ) && !empty( $codes ) ) {
-					foreach ( $codes as $code ) {
-						// Convert snake_case to Title Case
-						$issues[] = ucwords( str_replace( '_', ' ', $code ) );
-					}
-				}
-
-				$posts_data[] = [
-					'title' => $post->post_title,
-					'score' => $score,
-					'issues' => $issues,
-					'edit_link' => $edit_link
-				];
-			}
-
-			// Create AI prompt
-			$prompt = "You are an SEO consultant. Below are the 20 posts with the lowest SEO scores from a website. Each post has a score (0-100), a list of SEO issues, and an edit link.\n\n";
-
-			foreach ( $posts_data as $idx => $data ) {
-				$prompt .= sprintf(
-					"Post %d: \"%s\" (Score: %d)\n",
-					$idx + 1,
-					$data['title'],
-					$data['score']
-				);
-				if ( !empty( $data['issues'] ) ) {
-					$prompt .= "Issues: " . implode( ', ', $data['issues'] ) . "\n";
-				}
-				$prompt .= "Edit link: " . $data['edit_link'] . "\n\n";
-			}
-
-			$prompt .= "Based on these posts, write TWO short paragraphs:\n\n";
-			$prompt .= "Paragraph 1: Start with a friendly greeting (Hi, Hello, Hey). Address the user directly (you, your). Identify the 2-3 main SEO issues affecting these posts and quick fixes. Be specific and actionable. Keep it under 3 sentences.\n\n";
-			$prompt .= "Paragraph 2: Give 3 specific examples using short references. For each, create a markdown link using a brief topic/keyword from the title (2-4 words max), not the full title. Format: 'the posts about [topic](edit_link), [topic](edit_link), and [topic](edit_link)'. Keep it under 2 sentences.\n\n";
-			$prompt .= "Use markdown for **bold** emphasis on issue names. Keep the tone friendly, personal, and encouraging. Address the user directly throughout. Total length: 5 sentences maximum across both paragraphs.";
-
-			// Get AI response
-			$insight_text = $mwai->simpleTextQuery( $prompt, [ 'scope' => 'seo' ] );
-
-			// Store insight with timestamp
-			$now = current_time( 'mysql' );
-			$this->core->update_option( 'daily_insight_text', $insight_text );
-			$this->core->update_option( 'daily_insight_generated_at', $now );
-
-			return $this->success_response( [
-				'text' => $insight_text,
-				'generated_at' => $now,
-				'generated_at_ts' => strtotime( get_gmt_from_date( $now ) . ' UTC' )
-			] );
-
-		} catch ( Exception $e ) {
-			$this->core->log( '❌ Daily Insight error: ' . $e->getMessage() );
-			return $this->error_response( $e->getMessage(), 'generation_failed', 500 );
+		$result = $this->core->generate_daily_insight();
+		if ( is_wp_error( $result ) ) {
+			$status = $result->get_error_data();
+			return $this->error_response( $result->get_error_message(), $result->get_error_code(), is_int( $status ) ? $status : 500 );
 		}
+		return $this->success_response( $result );
 	}
 
 	function rest_get_daily_insight( $request ) {

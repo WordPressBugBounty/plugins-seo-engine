@@ -4,7 +4,7 @@ Tags: seo, redirection, sitemap, schema, analytics
 Donate link: https://www.patreon.com/meowapps
 Requires at least: 6.0
 Tested up to: 7.1
-Stable tag: 0.9.8
+Stable tag: 0.9.9
 Requires PHP: 8.1
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
@@ -297,6 +297,14 @@ No. The Redirections & 404 module handles URL redirects (301, 302, 307, 308, 410
 Yes, and it is fully automatic. When you publish or update a post, SEO Engine instantly notifies Bing, Yandex, Naver and every IndexNow-compatible engine, so your content gets crawled right away instead of waiting. The verification key is generated and served for you; there is nothing to configure. Note that Google does not use IndexNow and keeps reading your sitemap instead.
 
 == Changelog ==
+
+= 0.9.9 (2026/10/25) =
+* Add: Daily Insights now refresh automatically once a day.
+* Add: The header shows the installed version with update or renewal details, a Tutorial button and the Settings wrench.
+* Update: Renamed "AI Keywords" to "Target Topics" to avoid confusion with Yoast's focus keywords.
+* Update: AI generated titles and descriptions no longer use long dashes, and suggested SEO titles use the site's separator.
+* Fix: AI Visibility scans now report failures instead of loading endlessly.
+* Fix: The Daily Insights date no longer overlaps the title on narrow screens.
 
 = 0.9.8 (2026/10/19) =
 * Add: SEO Engine panel in the block editor to edit the SEO title and description.

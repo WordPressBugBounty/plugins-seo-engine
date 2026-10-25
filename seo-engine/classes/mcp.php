@@ -654,7 +654,7 @@ class Meow_MWSEO_MCP {
 
     $tools[] = [
       'name' => 'mwseo_set_ai_keywords',
-      'description' => 'Set AI keywords for a post to guide SEO Engine optimization. These keywords help the plugin understand what topics and concepts are important in the content, enabling better SEO analysis and recommendations. They are internal to SEO Engine and not WordPress tags.',
+      'description' => 'Set target topics (AI keywords) for a post. They are added to the AI prompts that generate the SEO title, description, slug and internal link suggestions; they are not output on the site and do not affect the SEO score. They are internal to SEO Engine and not WordPress tags.',
       'category' => 'SEO Engine',
       'accessLevel' => 'write',
       'inputSchema' => [
@@ -2302,7 +2302,7 @@ class Meow_MWSEO_MCP {
             "\nCurrent title: %s\nPost content sample: %s\n\nReturn ONLY a JSON array of strings, nothing else.",
             $count, $query_line, $current_title, $excerpt
           );
-          $prompt = sprintf( '<instructions>Reply ONLY with a JSON array of %d title strings in %s. No other text, no markdown fences.</instructions> <prompt>%s</prompt>', $count, $language, $prompt );
+          $prompt = sprintf( '<instructions>Reply ONLY with a JSON array of %d title strings in %s. No other text, no markdown fences. %s</instructions> <prompt>%s</prompt>', $count, $language, Meow_MWSEO_Modules_Suggestions::STYLE_RULE, $prompt );
 
           $raw = $mwai->simpleTextQuery( $prompt, [ 'scope' => 'seo' ] );
           $raw = trim( (string) $raw );
@@ -2358,7 +2358,7 @@ class Meow_MWSEO_MCP {
             "\nPost title: %s\nCurrent meta description: %s\nPost content sample: %s\n\nReturn ONLY a JSON array of strings, nothing else.",
             $count, $query_line, $post->post_title, ( $current_excerpt ?: '(none)' ), $content_sample
           );
-          $prompt = sprintf( '<instructions>Reply ONLY with a JSON array of %d meta description strings in %s. No other text, no markdown fences.</instructions> <prompt>%s</prompt>', $count, $language, $prompt );
+          $prompt = sprintf( '<instructions>Reply ONLY with a JSON array of %d meta description strings in %s. No other text, no markdown fences. %s</instructions> <prompt>%s</prompt>', $count, $language, Meow_MWSEO_Modules_Suggestions::STYLE_RULE, $prompt );
 
           $raw = $mwai->simpleTextQuery( $prompt, [ 'scope' => 'seo' ] );
           $raw = trim( (string) $raw );

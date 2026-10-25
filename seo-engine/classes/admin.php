@@ -124,9 +124,12 @@ class Meow_MWSEO_Admin extends MeowKit_MWSEO_Admin {
 
 	function admin_enqueue_scripts() {
 
-		// Load the scripts
-		$physical_file = MWSEO_PATH . '/app/index.js';
-		$cache_buster = file_exists( $physical_file ) ? filemtime( $physical_file ) : MWSEO_VERSION;
+		// Load the scripts. Version both bundles by the newest of the two: a NekoUI-only change
+		// rebuilds vendor.js alone, and versioning it by index.js kept the old one cached.
+		$mtimes = array_map( function( $file ) {
+			return file_exists( $file ) ? filemtime( $file ) : 0;
+		}, [ MWSEO_PATH . '/app/index.js', MWSEO_PATH . '/app/vendor.js' ] );
+		$cache_buster = max( $mtimes ) ?: MWSEO_VERSION;
 		wp_register_script( 'seo_engine_seo-vendor', MWSEO_URL . 'app/vendor.js',
 			['wp-element', 'wp-i18n'], $cache_buster
 		);
@@ -145,6 +148,8 @@ class Meow_MWSEO_Admin extends MeowKit_MWSEO_Admin {
 			'domain' => MWSEO_DOMAIN,
 			'is_pro' => class_exists( 'MeowPro_MWSEO_Core' ),
 			'is_registered' => !!$this->is_registered(),
+			// Installed vs latest version for the header line, from common/premium/renewal.php.
+			'version_info' => apply_filters( 'mwseo_meowapps_version_info', null ),
 			'rest_nonce' => wp_create_nonce( 'wp_rest' ),
 			'fabicon_url' => get_site_icon_url(),
 			'site_name' => get_bloginfo('name'),
@@ -171,7 +176,7 @@ class Meow_MWSEO_Admin extends MeowKit_MWSEO_Admin {
 		add_submenu_page( 'meowapps-main-menu', 'SEO Engine', 'SEO Engine', 'manage_options',
 			MWSEO_PREFIX . '_settings', array( $this, 'admin_settings' ) );
 
-		// Standalone "Surgical SEO" posts manager — shown alongside (never replacing) the
+		// Standalone "Surgical SEO" posts manager, shown alongside (never replacing) the
 		// native post lists, only when the Content SEO module is enabled, per enabled post type.
 		if ( $this->core->get_option( 'content_seo', false ) ) {
 			$post_types = (array) $this->core->get_option( 'select_post_types', ['post', 'page'] );

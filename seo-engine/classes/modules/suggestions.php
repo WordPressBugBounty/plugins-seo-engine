@@ -2,6 +2,10 @@
 
 class Meow_MWSEO_Modules_Suggestions
 {
+    // Shared by every prompt that writes titles or descriptions: models lean on long dashes,
+    // which read as AI-written in search results.
+    const STYLE_RULE = 'Do not use em-dashes or en-dashes to join ideas: use a comma, a colon or a period instead.';
+
     // TODO: Migrate $meta_key_seo_title to '_mwseo_title' and $meta_key_seo_excerpt to '_mwseo_excerpt'
     public static function prompt($post, $field, $customContent = null, $max_tokens = 500, $meta_key_seo_title = '_kiss_seo_title', $meta_key_seo_excerpt = '_kiss_seo_excerpt', $core = null ){
 		// Get the global core instance if not provided
@@ -45,7 +49,7 @@ class Meow_MWSEO_Modules_Suggestions
 				break;
 			case 'title_seo_length':
 			case 'seo_title':
-				$prompt = sprintf( "For the website \"%s\". Given the original SEO title: \"%s\" and a sample from the post content : \"%s\", create a new, SEO-optimized title that will attract more clicks. The format should be \"<short_title_keywords> | <site name>\". Ideally between 40 and 50 characters. It should be absolutely CONCISE and LESS than 70 characters.", get_bloginfo( 'name' ), get_post_meta( $post->ID, $meta_key_seo_title, true ), $originalContent );
+				$prompt = sprintf( "For the website \"%s\". Given the original SEO title: \"%s\" and a sample from the post content : \"%s\", create a new, SEO-optimized title that will attract more clicks. The format should be \"<short_title_keywords> %s <site name>\". Ideally between 40 and 50 characters. It should be absolutely CONCISE and LESS than 70 characters.", get_bloginfo( 'name' ), get_post_meta( $post->ID, $meta_key_seo_title, true ), $originalContent, $core->get_title_separator() );
 				$expected_size = 60;
 				break;
 			case 'excerpt_seo_length':
@@ -133,7 +137,7 @@ class Meow_MWSEO_Modules_Suggestions
 			}
 		}
 
-		$prompt = sprintf( '<instructions>Reply only with the asked content, no other text or explanations, nothing else. Your reply should be in %s.</instructions> <prompt>%s</prompt>', $language, $prompt );
+		$prompt = sprintf( '<instructions>Reply only with the asked content, no other text or explanations, nothing else. Your reply should be in %s. %s</instructions> <prompt>%s</prompt>', $language, self::STYLE_RULE, $prompt );
 
 		try {
 			$ai_suggestion = $mwai->simpleTextQuery( $prompt, [ 'scope' => 'seo' ] );
