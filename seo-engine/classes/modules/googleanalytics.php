@@ -1056,7 +1056,6 @@ class Meow_MWSEO_Modules_GoogleAnalytics
 			return array();
 		}
 
-		$rows_count = 0;
 		$data = array();
 		$all = array(
 			'total_visits'    => 0,
@@ -1075,7 +1074,6 @@ class Meow_MWSEO_Modules_GoogleAnalytics
 			if ( $this->is_noise_host( $host ) ) {
 				continue;
 			}
-			$rows_count++;
 
 			$sessions             = isset( $row['metricValues'][0]['value'] )    ? (int) $row['metricValues'][0]['value'] : 0;
 			$users                = isset( $row['metricValues'][1]['value'] )    ? (int) $row['metricValues'][1]['value'] : 0;
@@ -1100,18 +1098,18 @@ class Meow_MWSEO_Modules_GoogleAnalytics
 			$all['unique_visitors'] += $users;
 			$all['pageviews'] += $pageviews;
 
-			// We need to average the bounce rate and session duration
-			$all['bounce_rate'] += $bounce_rate;
-			$all['avg_session_duration'] += $avg_session_duration;
-			$all['pages_per_session'] += $pages_per_session;
+			// Rates are weighted by sessions: a plain average let a tiny host (a staging copy, a
+			// second language site) weigh as much as the main one in the "all" row.
+			$all['bounce_rate'] += $bounce_rate * $sessions;
+			$all['avg_session_duration'] += $avg_session_duration * $sessions;
+			$all['pages_per_session'] += $pages_per_session * $sessions;
 
 		}
 
-		// Averae the cumulative values
-		if ( $rows_count > 0 ) {
-			$all['bounce_rate']          = round( $all['bounce_rate'] / $rows_count, 2 );
-			$all['avg_session_duration'] = round( $all['avg_session_duration'] / $rows_count );
-			$all['pages_per_session']    = round( $all['pages_per_session'] / $rows_count, 2 );
+		if ( $all['total_visits'] > 0 ) {
+			$all['bounce_rate']          = round( $all['bounce_rate'] / $all['total_visits'], 2 );
+			$all['avg_session_duration'] = round( $all['avg_session_duration'] / $all['total_visits'] );
+			$all['pages_per_session']    = round( $all['pages_per_session'] / $all['total_visits'], 2 );
 		}
 
 		// We add the overall summary

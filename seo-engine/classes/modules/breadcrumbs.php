@@ -186,7 +186,7 @@ class Meow_MWSEO_Modules_Breadcrumbs
 			'itemListElement' => $elements,
 		) );
 		echo '<script type="application/ld+json" class="mwseo-schema-breadcrumbs">' . "\n";
-		echo wp_json_encode( $schema, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT );
+		echo wp_json_encode( $schema, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_PRETTY_PRINT );
 		echo "\n" . '</script>' . "\n";
 	}
 

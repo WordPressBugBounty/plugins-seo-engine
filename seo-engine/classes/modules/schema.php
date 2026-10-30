@@ -60,7 +60,7 @@ class Meow_MWSEO_Modules_Schema
 		$schema = $this->generate_schema( $post );
 		if ( $schema ) {
 			echo '<script type="application/ld+json" class="mwseo-schema">' . "\n";
-			echo wp_json_encode( $schema, JSON_UNESCAPED_SLASHES | JSON_PRETTY_PRINT );
+			echo wp_json_encode( $schema, JSON_UNESCAPED_SLASHES | JSON_HEX_TAG | JSON_PRETTY_PRINT );
 			echo "\n" . '</script>' . "\n";
 		}
 	}

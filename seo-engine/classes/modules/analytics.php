@@ -948,18 +948,33 @@ class Meow_MWSEO_Modules_Analytics
 					COUNT(*) as total_visits,
 					COUNT(DISTINCT user_ip) as unique_visitors,
 					COUNT(DISTINCT post_id) as unique_posts,
-					SUM(is_logged_in) as logged_in_visits,
-					AVG(CASE WHEN is_logged_in = 0 THEN 1 ELSE 0 END) * 100 as bounce_rate
+					SUM(is_logged_in) as logged_in_visits
 					FROM $this->table_name
 					WHERE $where_clause";
 
+				// Bounce rate: the share of visits that saw a single page. session_id identifies a
+				// visitor (IP + browser), not a session, so a visit is one visitor on one day. It used
+				// to be the share of logged-out rows, which read about 100% on every site.
+				$bounce_sql = "SELECT AVG( pages = 1 ) * 100 FROM (
+					SELECT COUNT(DISTINCT post_id) AS pages
+					FROM $this->table_name
+					WHERE $where_clause
+					GROUP BY COALESCE( session_id, user_ip ), DATE( visit_date )
+				) visits";
+
 				if ( !empty( $where_values ) ) {
 					$query = $wpdb->prepare( $sql, ...$where_values );
+					$bounce_sql = $wpdb->prepare( $bounce_sql, ...$where_values );
 				} else {
 					$query = $sql;
 				}
 
-				return $wpdb->get_row( $query, ARRAY_A );
+				$summary = $wpdb->get_row( $query, ARRAY_A );
+				if ( is_array( $summary ) ) {
+					$bounce_rate = $wpdb->get_var( $bounce_sql );
+					$summary['bounce_rate'] = $bounce_rate === null ? null : round( (float) $bounce_rate, 1 );
+				}
+				return $summary;
 		}
 	}
 

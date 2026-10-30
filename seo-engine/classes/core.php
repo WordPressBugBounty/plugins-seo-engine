@@ -67,6 +67,13 @@ class Meow_MWSEO_Core
 			add_action( 'template_redirect', array( $this, 'handle_attachment_redirect' ) );
 		}
 
+		// WordPress serves its own sitemap whether or not the Sitemap module is on, and "hide from
+		// search" adds posts to the excluded list, so the exclusions always apply.
+		$this->register_sitemap_exclusions();
+
+		// SEO Engine's card on the Meow Apps dashboard (common/).
+		add_filter( MWSEO_PREFIX . '_meowapps_status', [ $this, 'get_meowapps_status' ] );
+
 		// Dashboard
 		$use_mwseo_sitemap = $this->get_option( 'sitemap', false );
 		if ( $use_mwseo_sitemap ) {
@@ -637,6 +644,13 @@ class Meow_MWSEO_Core
 
 	
 
+	// Decode first, then strip: stripping first let an entity-encoded tag (&lt;script&gt;) through
+	// and the decode turned it into a real one (stored XSS reported by Wordfence, Oct 2026).
+	// The result is plain text: every output must still escape it for its context.
+	function to_plain_text( $text ) {
+		return trim( wp_strip_all_tags( html_entity_decode( (string) $text, ENT_QUOTES | ENT_HTML5, 'UTF-8' ) ) );
+	}
+
 	function build_excerpt( $post, $excerpt = "", $ignore_custom = false ) {
 		if ( is_category() || is_tag() || is_tax() ) {
 			$term = get_queried_object();
@@ -668,8 +682,7 @@ class Meow_MWSEO_Core
 			$seo_excerpt = $ignore_custom ? '' : get_post_meta( $post->ID, $this->meta_key_seo_excerpt, true );
 			$excerpt = !empty( $seo_excerpt ) ? $seo_excerpt : get_the_excerpt( $post->ID );
 		}
-		$excerpt = html_entity_decode( $excerpt );
-		return $excerpt;
+		return $this->to_plain_text( $excerpt );
 	}
 
 	// SEO title or description set for the current post type archive (like /projects/), in the archive_seo option.
@@ -736,13 +749,12 @@ class Meow_MWSEO_Core
 				$title = get_the_title( $post->ID );
 			}
 		}
-		$title = trim( strip_tags( $title ) );
+		$title = trim( $title );
 		$site = trim( get_bloginfo( 'name' ) );
 		if ( !$override && $site !== '' ) {
 			$title = $title . ' ' . $this->get_title_separator() . ' ' . $site;
 		}
-		$title = html_entity_decode( $title );
-		return $title;
+		return $this->to_plain_text( $title );
 	}
 
 	// Kept in sync with the detection surfaced to the admin UI in admin.php.
@@ -757,6 +769,97 @@ class Meow_MWSEO_Core
 	// canonical, Open Graph). In 'auto' it steps back when another SEO plugin is active
 	// so the two don't emit duplicate tags; 'always' and 'never' force the behavior.
 	// The analysis, scoring, AI and MCP features run regardless of this setting.
+	/**
+	 * Average SEO score and what needs doing, for the Meow Apps dashboard. Reads the scores
+	 * stored at each analysis: the dashboard must open instantly, so never analyze from here.
+	 */
+	function get_meowapps_status() {
+		global $wpdb;
+		if ( !$this->get_option( 'content_seo', false ) ) {
+			return null;
+		}
+		$post_types = array_values( array_filter( (array) $this->get_option( 'select_post_types', [ 'post', 'page' ] ), 'is_string' ) );
+		if ( empty( $post_types ) ) {
+			return null;
+		}
+		$in = implode( ',', array_fill( 0, count( $post_types ), '%s' ) );
+		$scores = $wpdb->get_row( $wpdb->prepare(
+			"SELECT COUNT(*) AS analyzed, AVG( CAST( pm.meta_value AS DECIMAL(5,2) ) ) AS average,
+				SUM( CAST( pm.meta_value AS DECIMAL(5,2) ) < 50 ) AS poor
+			FROM {$wpdb->posts} p
+			JOIN {$wpdb->postmeta} pm ON pm.post_id = p.ID AND pm.meta_key = '_mwseo_score'
+			WHERE p.post_status = 'publish' AND p.post_type IN ($in)",
+			$post_types
+		) );
+		$not_analyzed = (int) $wpdb->get_var( $wpdb->prepare(
+			"SELECT COUNT(*) FROM {$wpdb->posts} p
+			LEFT JOIN {$wpdb->postmeta} pm ON pm.post_id = p.ID AND pm.meta_key = '_mwseo_score'
+			LEFT JOIN {$wpdb->postmeta} skip ON skip.post_id = p.ID AND skip.meta_key = %s
+			WHERE p.post_status = 'publish' AND p.post_type IN ($in) AND pm.post_id IS NULL AND skip.post_id IS NULL",
+			array_merge( [ $this->meta_key_skip ], $post_types )
+		) );
+		$analyzed = $scores ? (int) $scores->analyzed : 0;
+		if ( !$analyzed && !$not_analyzed ) {
+			return null;
+		}
+
+		$url = admin_url( 'admin.php?page=mwseo_settings&nekoTab=' );
+		$todos = [];
+		$poor = $scores ? (int) $scores->poor : 0;
+		if ( $poor ) {
+			$todos[] = [
+				'text' => sprintf( _n( '%s post with a poor SEO score', '%s posts with a poor SEO score', $poor, 'seo-engine' ), number_format_i18n( $poor ) ),
+				'severity' => 'info',
+				'action' => [ 'label' => __( 'Fix', 'seo-engine' ), 'url' => $url . 'bulk-seo' ],
+			];
+		}
+		if ( $not_analyzed ) {
+			$todos[] = [
+				'text' => sprintf( _n( '%s post not analyzed yet', '%s posts not analyzed yet', $not_analyzed, 'seo-engine' ), number_format_i18n( $not_analyzed ) ),
+				'severity' => 'info',
+				'action' => [ 'label' => __( 'Analyze', 'seo-engine' ), 'url' => $url . 'content' ],
+			];
+		}
+		return [
+			'metric' => $analyzed ? [ 'value' => (string) round( (float) $scores->average ), 'label' => __( 'avg SEO score', 'seo-engine' ) ] : null,
+			'todos' => $todos,
+			'note' => sprintf( _n( '%s post analyzed', '%s posts analyzed', $analyzed, 'seo-engine' ), number_format_i18n( $analyzed ) ),
+		];
+	}
+
+	function register_sitemap_exclusions() {
+		$excluded_providers = array_filter( [
+			$this->get_option( 'sitemap_exclude_users_provider', false ) ? 'users' : null,
+			$this->get_option( 'sitemap_exclude_posts_provider', false ) ? 'posts' : null,
+			$this->get_option( 'sitemap_exclude_taxonomies_provider', false ) ? 'taxonomies' : null,
+		] );
+		$excluded_post_types = (array) $this->get_option( 'sitemap_excluded_post_types', [] );
+		$excluded_taxonomies = (array) $this->get_option( 'sitemap_excluded_taxonomies', [] );
+		$excluded_posts = array_filter( array_map( 'intval', (array) $this->get_option( 'sitemap_excluded_post_ids', [] ) ) );
+
+		if ( !empty( $excluded_providers ) ) {
+			add_filter( 'wp_sitemaps_add_provider', function( $provider, $name ) use ( $excluded_providers ) {
+				return in_array( $name, $excluded_providers, true ) ? false : $provider;
+			}, 10, 2 );
+		}
+		if ( !empty( $excluded_post_types ) ) {
+			add_filter( 'wp_sitemaps_post_types', function( $post_types ) use ( $excluded_post_types ) {
+				return array_diff_key( $post_types, array_flip( $excluded_post_types ) );
+			} );
+		}
+		if ( !empty( $excluded_taxonomies ) ) {
+			add_filter( 'wp_sitemaps_taxonomies', function( $taxonomies ) use ( $excluded_taxonomies ) {
+				return array_diff_key( $taxonomies, array_flip( $excluded_taxonomies ) );
+			} );
+		}
+		if ( !empty( $excluded_posts ) ) {
+			add_filter( 'wp_sitemaps_posts_query_args', function( $args ) use ( $excluded_posts ) {
+				$args['post__not_in'] = array_merge( isset( $args['post__not_in'] ) ? (array) $args['post__not_in'] : [], $excluded_posts );
+				return $args;
+			} );
+		}
+	}
+
 	function should_render_frontend_meta() {
 		$mode = $this->get_option( 'frontend_meta_mode', 'auto' );
 		if ( $mode === 'always' ) {
@@ -1502,6 +1605,19 @@ class Meow_MWSEO_Core
 		}
 		
 		return $options;
+	}
+
+	// Merges only the changed keys into a fresh read of what is stored, so the request stays
+	// small and a change made elsewhere in the meantime is not overwritten with an older copy.
+	function patch_options( array $changes ) {
+		wp_cache_delete( $this->option_name, 'options' );
+		$stored = get_option( $this->option_name, [] );
+		$stored = is_array( $stored ) ? $stored : [];
+		foreach ( $changes as $key => $value ) {
+			$stored[ $key ] = $value;
+		}
+		$result = $this->update_options( $stored );
+		return $result === false ? false : $this->sanitized_options();
 	}
 
 	function update_options( $options ) {
@@ -2292,7 +2408,8 @@ class Meow_MWSEO_Core
 	public function redirect_attachment_to_parent( $link, $post_id ) {
 		$attachment = get_post( $post_id );
 		if ( $attachment && $attachment->post_type === 'attachment' && $attachment->post_parent ) {
-			return get_permalink( $attachment->post_parent );
+			// A deleted parent has no permalink: keep the attachment's own link.
+			return get_permalink( $attachment->post_parent ) ?: $link;
 		}
 		return $link;
 	}

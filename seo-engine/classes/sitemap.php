@@ -9,107 +9,20 @@ class Meow_MWSEO_Sitemap extends WP_Sitemaps_Provider
     $this->init();
   }
 
-  function init(  )
+  function init()
   {
-    $disabled = $this->core->get_option( 'disable_wp_sitemap', false );
-    $custom = $this->core->get_option( 'sitemap_custom', false );
-    if ( $disabled ) {
-      add_filter( 'wp_sitemaps_enabled', '__return_false' );
-
-      // Make our own sitemap if the WP sitemap is disabled
-      if ( $custom ) {
-        // Generate the sitemap on a new post save
-        add_action( 'wp_after_insert_post', array( $this, 'create_sitemap_callback' ), 10, 3 );
-
-        // Generate the sitemap on post deletion
-        // add_action( 'delete_post', array( $this, 'create_sitemap_callback' ), 10, 3 );
-
-
-
-        add_filter( 'robots_txt', array( $this, 'add_sitemap_to_robots' ), 10, 1 );
-      }
-
-
+    // The exclusions are registered by the core, for WordPress's sitemap with or without this module.
+    if ( !$this->core->get_option( 'disable_wp_sitemap', false ) ) {
       return;
     }
+    add_filter( 'wp_sitemaps_enabled', '__return_false' );
 
-    // Excluding Providers
-    $excluded_providers = [
-      $this->core->get_option( 'sitemap_exclude_users_provider', false ) ? 'users' : null,
-      $this->core->get_option( 'sitemap_exclude_posts_provider', false ) ? 'posts' : null,
-      $this->core->get_option( 'sitemap_exclude_taxonomies_provider', false ) ? 'taxonomies' : null,
-    ];
-
-    add_filter( 
-      'wp_sitemaps_add_provider',
-      function ( $provider, $name ) use ( $excluded_providers ) {
-        if ( in_array( $name, $excluded_providers ) ) {
-          return false;
-        }
-
-        return $provider;
-      },
-      10,
-      2
-     );
-
-    // Exclude Post Types
-    $excluded_post_types = $this->core->get_option('sitemap_excluded_post_types', []);
-    add_filter(
-        'wp_sitemaps_post_types',
-        function ($post_types) use ($excluded_post_types) {
-
-            foreach ($excluded_post_types as $excluded_post_type) {
-                if (isset($post_types[$excluded_post_type])) {
-                    unset($post_types[$excluded_post_type]);
-                }
-            }
-
-            return $post_types;
-        },
-        10,
-        1
-    );
-
-    //Exclude Taxonomies
-    $excluded_taxonomies = $this->core->get_option( 'sitemap_excluded_taxonomies', [] );
-    add_filter( 
-      'wp_sitemaps_taxonomies',
-      function ( $taxonomies ) use ( $excluded_taxonomies ) {
-
-        foreach( $excluded_taxonomies as $excluded_taxonomy ) {
-          if ( isset( $taxonomies[$excluded_taxonomy] ) ) {
-            unset( $taxonomies[$excluded_taxonomy] );
-          }
-        }
-
-        return $taxonomies;
-      }
-     );
-
-
-    //Exclude specific posts
-    $excluded_posts = $this->core->get_option( 'sitemap_excluded_post_ids', [] );
-    try {
-      $excluded_posts = array_map( 'intval', $excluded_posts );
-    } catch ( Exception $e ) {
-      $excluded_posts = [];
-      $this->core->log( '❌ ( Sitemap ) Error parsing excluded post ids.' );
+    // Make our own sitemap if the WP sitemap is disabled
+    if ( $this->core->get_option( 'sitemap_custom', false ) ) {
+      // Generate the sitemap on a new post save
+      add_action( 'wp_after_insert_post', array( $this, 'create_sitemap_callback' ), 10, 3 );
+      add_filter( 'robots_txt', array( $this, 'add_sitemap_to_robots' ), 10, 1 );
     }
-    add_filter( 
-      'wp_sitemaps_posts_query_args',
-      function ( $args, $post_type ) use ( $excluded_posts ) {
-        // if ( $post_type !== 'post' ) {
-        //   return $args;
-        // }
-        $args['post__not_in'] = isset( $args['post__not_in'] ) ? $args['post__not_in'] : array(  );
-        $args['post__not_in'] = array_merge( $args['post__not_in'], $excluded_posts );
-
-        return $args;
-      },
-      10,
-      2
-     );
   }
 
   public function get_url_list( $page, $post_type = null )
@@ -201,6 +114,9 @@ class Meow_MWSEO_Sitemap extends WP_Sitemaps_Provider
 
     // Remove the ones excluded by the user in the plugin options
     $public_post_types = get_post_types( [ 'public' => true ], 'names' );
+    // Like WordPress's sitemap, no attachment pages: they are thin, or redirect to their post.
+    unset( $public_post_types['attachment'] );
+    @unlink( ABSPATH . 'wp-sitemap-posts-attachment-1.xml' );
     foreach ( $excluded_post_types as $excluded_type ) {
         if ( isset( $public_post_types[ $excluded_type ] ) ) {
             unset( $public_post_types[ $excluded_type ] );
@@ -322,12 +238,16 @@ private function create_sitemap_for_post_type( $post_type, $excluded_posts = [] 
     $xml .= '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9" xmlns:xhtml="http://www.w3.org/1999/xhtml">' . "\n";
 
     foreach ( $posts as $post ) {
+        $permalink = get_permalink( $post->ID );
+        if ( ! $permalink ) {
+            continue;
+        }
         setup_postdata( $post );
         $post_lastmod = $post->post_modified;
         $lastmod_iso8601 = mysql2date( 'c', $post_lastmod, false );
 
         $xml .= "  <url>\n";
-        $xml .= "    <loc>" . esc_url( get_permalink( $post->ID ) ) . "</loc>\n";
+        $xml .= "    <loc>" . esc_url( $permalink ) . "</loc>\n";
         $xml .= "    <lastmod>" . esc_html( $lastmod_iso8601 ) . "</lastmod>\n";
         $xml .= "    <changefreq>daily</changefreq>\n";
         $xml .= "    <priority>1.0</priority>\n";

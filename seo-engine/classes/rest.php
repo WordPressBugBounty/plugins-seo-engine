@@ -713,6 +713,13 @@ class Meow_MWSEO_Rest
 	function rest_settings_update( $request ) {
 		try {
 			$params = $request->get_json_params();
+			// The settings screen sends only what changed ('changes'): posting every option at once
+			// (300 KB and more) was refused by some hosts with a bare 400 Bad Request.
+			if ( isset( $params['changes'] ) && is_array( $params['changes'] ) ) {
+				$options = $this->core->patch_options( $params['changes'] );
+				$success = !!$options;
+				return new WP_REST_Response([ 'success' => $success, 'message' => $success ? 'OK' : __( 'Could not update options.', 'seo-engine' ), 'options' => $options ], 200 );
+			}
 			$value = $params['options'] ?? null;
 			// An empty payload (e.g. an old {} settings export) would otherwise wipe every option.
 			if ( !is_array( $value ) || empty( $value ) ) {

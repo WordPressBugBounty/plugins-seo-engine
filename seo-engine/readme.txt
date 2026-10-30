@@ -4,7 +4,7 @@ Tags: seo, redirection, sitemap, schema, analytics
 Donate link: https://www.patreon.com/meowapps
 Requires at least: 6.0
 Tested up to: 7.1
-Stable tag: 0.9.9
+Stable tag: 1.0.0
 Requires PHP: 8.1
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
@@ -13,7 +13,9 @@ Made it through the SEO plugin wasteland? You've earned a coffee ☺️ Quietly 
 
 == Description ==
 
-**SEO Engine is the lightweight, intelligent SEO solution for WordPress.** Built from scratch for modern websites, it combines powerful AI with clean code to help you rank better without slowing down your site. 
+**SEO Engine is the lightweight, intelligent SEO solution for WordPress.** Built from scratch for modern websites, it combines powerful AI with clean code to help you rank better without slowing down your site.
+
+https://www.youtube.com/watch?v=5hvtiwqh7LM
 
 Stop fighting bloated SEO plugins that promise everything while turning your WordPress into a slower experience! 😘
 
@@ -297,6 +299,15 @@ No. The Redirections & 404 module handles URL redirects (301, 302, 307, 308, 410
 Yes, and it is fully automatic. When you publish or update a post, SEO Engine instantly notifies Bing, Yandex, Naver and every IndexNow-compatible engine, so your content gets crawled right away instead of waiting. The verification key is generated and served for you; there is nothing to configure. Note that Google does not use IndexNow and keeps reading your sitemap instead.
 
 == Changelog ==
+
+= 1.0.0 (2026/10/30) =
+* Fix: Security: Stored XSS where titles and descriptions were rendered as raw HTML in the admin preview, insights and JSON-LD.
+* Add: SEO Engine card on the Meow Apps dashboard showing the average SEO score, posts with a poor score and posts not analyzed yet.
+* Update: Sitemap exclusions now also apply to the WordPress sitemap when the Sitemap module is off, and can be set from Settings → Sitemap at any time.
+* Update: Attachments are excluded from the sitemap, and empty attachment entries are removed from the filters.
+* Fix: Private Analytics now reports a real bounce rate, the share of visits that saw a single page, instead of nearly 100% on every site.
+* Fix: Google Analytics all-hosts row now weights bounce rate, session duration and pages per session by sessions, so a small host no longer skews them.
+* Fix: Settings now save only the changed values, so hosts that rejected the full settings request with a 400 error can save again.
 
 = 0.9.9 (2026/10/25) =
 * Add: Daily Insights now refresh automatically once a day.
