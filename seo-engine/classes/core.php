@@ -669,7 +669,13 @@ class Meow_MWSEO_Core
 		else if ( is_home() ) {
 			$page_for_posts = (int) get_option( 'page_for_posts' );
 			// Latest posts on the front page have no page of their own: get_the_excerpt( 0 ) returned the newest post's.
-			$excerpt = $page_for_posts ? get_the_excerpt( $page_for_posts ) : get_bloginfo( 'description' );
+			if ( $page_for_posts ) {
+				$seo_excerpt = $ignore_custom ? '' : get_post_meta( $page_for_posts, $this->meta_key_seo_excerpt, true );
+				$excerpt = !empty( $seo_excerpt ) ? $seo_excerpt : get_the_excerpt( $page_for_posts );
+			}
+			else {
+				$excerpt = get_bloginfo( 'description' );
+			}
 		}
 		else if ( is_post_type_archive() ) {
 			$seo_description = $this->get_archive_seo( 'description' );
@@ -716,7 +722,12 @@ class Meow_MWSEO_Core
 		}
 		else if ( is_home() ) {
 			$page_for_posts = (int) get_option( 'page_for_posts' );
-			if ( $page_for_posts ) {
+			$seo_title = $page_for_posts && !$ignore_custom ? get_post_meta( $page_for_posts, $this->meta_key_seo_title, true ) : '';
+			if ( !empty( $seo_title ) ) {
+				$override = true;
+				$title = $seo_title;
+			}
+			else if ( $page_for_posts ) {
 				$title = get_the_title( $page_for_posts );
 			}
 			else {
@@ -1476,6 +1487,7 @@ class Meow_MWSEO_Core
 			'check_missing_alt_text' => true,
 			'check_orphaned_content' => true,
 			'auto_schema_enabled' => false,
+			'breadcrumb_schema' => true,
 			'title_separator' => '|',
 
 			// Length Guidelines

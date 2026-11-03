@@ -4,7 +4,7 @@ Tags: seo, redirection, sitemap, schema, analytics
 Donate link: https://www.patreon.com/meowapps
 Requires at least: 6.0
 Tested up to: 7.1
-Stable tag: 1.0.0
+Stable tag: 1.0.1
 Requires PHP: 8.1
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
@@ -299,6 +299,11 @@ No. The Redirections & 404 module handles URL redirects (301, 302, 307, 308, 410
 Yes, and it is fully automatic. When you publish or update a post, SEO Engine instantly notifies Bing, Yandex, Naver and every IndexNow-compatible engine, so your content gets crawled right away instead of waiting. The verification key is generated and served for you; there is nothing to configure. Note that Google does not use IndexNow and keeps reading your sitemap instead.
 
 == Changelog ==
+
+= 1.0.1 (2026/11/03) =
+* Add: Breadcrumb Schema setting, on by default, to turn off the BreadcrumbList markup when your theme already outputs one.
+* Update: The Posts page now uses its own SEO title and description instead of the page title and excerpt.
+* Fix: The 404 log now says logging is off when 404 tracking is disabled, instead of saying visitors find everything.
 
 = 1.0.0 (2026/10/30) =
 * Fix: Security: Stored XSS where titles and descriptions were rendered as raw HTML in the admin preview, insights and JSON-LD.

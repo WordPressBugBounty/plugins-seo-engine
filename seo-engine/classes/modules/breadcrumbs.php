@@ -14,7 +14,7 @@ class Meow_MWSEO_Modules_Breadcrumbs
 		add_action( 'enqueue_block_editor_assets', array( $this, 'enqueue_editor_assets' ) );
 		add_shortcode( 'seo_engine_breadcrumbs', array( $this, 'shortcode' ) );
 
-		if ( !is_admin() && $this->core->get_option( 'auto_schema_enabled', false ) ) {
+		if ( !is_admin() && $this->core->get_option( 'auto_schema_enabled', false ) && $this->core->get_option( 'breadcrumb_schema', true ) ) {
 			add_action( 'wp_head', array( $this, 'inject_schema' ), 6 );
 		}
 	}
