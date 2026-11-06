@@ -119,6 +119,32 @@ class Meow_MWSEO_Modules_Analytics
 			add_filter( 'the_content', [ $this, 'inject_ai_agent_instructions' ], 10, 1 );
 		}
 
+		// Both logs grew forever (17 MB of bot rows in a year on meowapps.com), so prune them daily.
+		add_action( 'mwseo_prune_analytics', [ $this, 'prune_old_rows' ] );
+		if ( !wp_next_scheduled( 'mwseo_prune_analytics' ) ) {
+			wp_schedule_event( time() + 3600, 'daily', 'mwseo_prune_analytics' );
+		}
+	}
+
+	public function prune_old_rows() {
+		$days = intval( $this->core->get_option( 'analytics_retention_days', 365 ) );
+		if ( $days <= 0 ) {
+			return;
+		}
+		global $wpdb;
+		// Small batches so a large table is never locked for long; anything left over goes on the next run.
+		$batch = 5000;
+		foreach ( [ $this->ai_agents_table, $this->table_name ] as $table ) {
+			for ( $i = 0; $i < 40; $i++ ) {
+				$deleted = $wpdb->query( $wpdb->prepare(
+					"DELETE FROM $table WHERE visit_date < DATE_SUB( NOW(), INTERVAL %d DAY ) LIMIT %d",
+					$days, $batch
+				) );
+				if ( !$deleted || $deleted < $batch ) {
+					break;
+				}
+			}
+		}
 	}
 
 	private function maybe_create_analytics_table()

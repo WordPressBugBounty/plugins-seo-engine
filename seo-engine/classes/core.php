@@ -1382,6 +1382,7 @@ class Meow_MWSEO_Core
 			
 			// Analytics Options
 			'bots_track' => true,
+			'analytics_retention_days' => 365,
 			'bots_instructions' => false,
 			'bots_instructions_content' => '',
 			// Private Analytics
@@ -1848,7 +1849,7 @@ class Meow_MWSEO_Core
 		}
 
 		if ( count( $update ) > 1 ) {
-			$result = wp_update_post( $update, true );
+			$result = wp_update_post( wp_slash( $update ), true );
 			if ( is_wp_error( $result ) ) {
 				throw new Exception( $result->get_error_message() );
 			}
