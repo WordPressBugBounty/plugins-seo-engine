@@ -52,6 +52,10 @@ class Meow_MWSEO_Core
 
 		$mwseo = new Meow_MWSEO_API( $this );
 
+		if ( is_admin() && !get_option( 'mwseo_meta_cleaned' ) ) {
+			$this->clean_post_meta();
+		}
+
 		// Part of the core, settings and stuff
 		$this->admin = new Meow_MWSEO_Admin( $this );
 
@@ -1219,6 +1223,20 @@ class Meow_MWSEO_Core
 	 * Migrate old meta keys to new mwseo prefixed keys
 	 * This migration runs once per post when the post is accessed/analyzed
 	 */
+	// One-time cleanup (1.0.4): analysis sessions moved to transients, and empty values
+	// are no longer stored. Batched so large postmeta tables are never locked for long.
+	public function clean_post_meta() {
+		global $wpdb;
+		update_option( 'mwseo_meta_cleaned', 1, true ); // First, so a timeout never retries on every admin load.
+		do {
+			$deleted = $wpdb->query( "DELETE FROM {$wpdb->postmeta}
+				WHERE meta_key = '_mwseo_analysis_session'
+				OR ( ( meta_key LIKE '\\_mwseo\\_%' OR meta_key IN ( '_kiss_seo_title', '_kiss_seo_excerpt' ) )
+					AND ( meta_value = '' OR meta_value IS NULL ) )
+				LIMIT 5000" );
+		} while ( $deleted === 5000 );
+	}
+
 	public function migrate_post_meta_keys( $post_id ) {
 		// Mapping of old keys to new keys
 		$meta_keys_map = [

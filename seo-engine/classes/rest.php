@@ -1870,18 +1870,13 @@ class Meow_MWSEO_Rest
 		], 200 );
 	}
 
+	// Empty values are never stored: the row is removed instead.
 	function update_or_delete_post_meta( $post_id, $meta_key, $meta_value ) {
-		//add post meta if non-existent
-		if ( !get_post_meta( $post_id, $meta_key ) ) {
-			add_post_meta( $post_id, $meta_key, $meta_value );
-			return;
-		}
-
 		if ( $meta_value ) {
 			update_post_meta( $post_id, $meta_key, $meta_value );
 		}
 		else {
-			delete_post_meta( $post_id, $meta_key, $meta_value );
+			delete_post_meta( $post_id, $meta_key );
 		}
 	}
 
@@ -4006,10 +4001,10 @@ class Meow_MWSEO_Rest
 			$session_id = wp_generate_uuid4();
 
 			// Store session metadata
-			update_post_meta( $post_id, '_mwseo_analysis_session', [
+			set_transient( 'mwseo_analysis_session_' . $post_id, [
 				'session_id' => $session_id,
 				'started_at' => time(),
-			] );
+			], HOUR_IN_SECONDS );
 
 			// Run baseline analysis (technical checks only)
 			$result = $this->core->calculate_seo_score( $post, 'baseline' );
@@ -4052,7 +4047,7 @@ class Meow_MWSEO_Rest
 			}
 
 			// Check if session is still valid
-			$session_meta = get_post_meta( $post_id, '_mwseo_analysis_session', true );
+			$session_meta = get_transient( 'mwseo_analysis_session_' . $post_id );
 			if ( !$session_meta || $session_meta['session_id'] !== $session_id ) {
 				return new WP_REST_Response( [
 					'success' => false,
@@ -4172,11 +4167,11 @@ class Meow_MWSEO_Rest
 			$session_id = wp_generate_uuid4();
 
 			// Store session metadata
-			update_post_meta( $post_id, '_mwseo_analysis_session', [
+			set_transient( 'mwseo_analysis_session_' . $post_id, [
 				'session_id' => $session_id,
 				'started_at' => time(),
 				'mode' => $mode,
-			] );
+			], HOUR_IN_SECONDS );
 
 			// Get list of AI steps (if full mode)
 			$ai_steps = [];
@@ -4224,7 +4219,7 @@ class Meow_MWSEO_Rest
 			}
 
 			// Check if session is still valid
-			$session_meta = get_post_meta( $post_id, '_mwseo_analysis_session', true );
+			$session_meta = get_transient( 'mwseo_analysis_session_' . $post_id );
 			if ( !$session_meta || $session_meta['session_id'] !== $session_id ) {
 				return $this->error_response( 'Session has been superseded by a newer analysis', 'stale_session', 409 );
 			}

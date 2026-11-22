@@ -779,7 +779,42 @@ class Meow_MWSEO_Modules_GoogleAnalytics
 			return array();
 		}
 
+		$args['spam'] = $this->get_spam_sessions( $args['start_date'], $args['end_date'] );
 		return $this->transform_analytics_data( $response, $args );
+	}
+
+	// Referral spam sent straight to the GA4 measurement ID lands as normal sessions whose page title is a
+	// bare domain ("trafficheap.com", ~500 fake visits a week on meowapps.com in 2026-11). GA4 can't filter
+	// it afterwards, so it is counted per day and host here and taken out of the visit totals.
+	private function get_spam_sessions( $start_date, $end_date ) {
+		$response = $this->make_google_analytics_request( 'runReport', array(
+			'dateRanges' => array( array( 'startDate' => $start_date, 'endDate' => $end_date ) ),
+			'dimensions' => array( array( 'name' => 'date' ), array( 'name' => 'hostName' ), array( 'name' => 'pageTitle' ) ),
+			'metrics' => array( array( 'name' => 'sessions' ), array( 'name' => 'totalUsers' ), array( 'name' => 'screenPageViews' ) ),
+			'dimensionFilter' => array( 'filter' => array(
+				'fieldName' => 'pageTitle',
+				'stringFilter' => array( 'matchType' => 'FULL_REGEXP', 'value' => '[A-Za-z0-9-]+(\\.[A-Za-z0-9-]+)*\\.[A-Za-z]{2,}' ),
+			) ),
+			'limit' => 1000,
+		) );
+		$own = (string) wp_parse_url( home_url(), PHP_URL_HOST );
+		$spam = array();
+		foreach ( ( $response['rows'] ?? array() ) as $row ) {
+			if ( $own !== '' && stripos( $row['dimensionValues'][2]['value'] ?? '', $own ) !== false ) {
+				continue;
+			}
+			$key = ( $row['dimensionValues'][0]['value'] ?? '' ) . '|' . ( $row['dimensionValues'][1]['value'] ?? '' );
+			foreach ( array( 'sessions', 'users', 'pageviews' ) as $i => $k ) {
+				$spam[ $key ][ $k ] = ( $spam[ $key ][ $k ] ?? 0 ) + (int) ( $row['metricValues'][ $i ]['value'] ?? 0 );
+			}
+		}
+		return $spam;
+	}
+
+	private function is_spam_title( $title ) {
+		$title = trim( (string) $title );
+		$own = (string) wp_parse_url( home_url(), PHP_URL_HOST );
+		return preg_match( '/^[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}$/', $title ) && ( $own === '' || stripos( $title, $own ) === false );
 	}
 
 	private function get_analytics_summary_from_api( $start_date, $end_date )
@@ -960,6 +995,12 @@ class Meow_MWSEO_Modules_GoogleAnalytics
 			$users       = isset( $row['metricValues'][1]['value'] ) ? (int) $row['metricValues'][1]['value'] : 0;
 			$pageviews   = isset( $row['metricValues'][2]['value'] ) ? (int) $row['metricValues'][2]['value'] : 0;
 			$bounce_rate = isset( $row['metricValues'][3]['value'] ) ? (float) $row['metricValues'][3]['value'] * 100 : 0;
+			$spam = $args['spam'][ $date_raw . '|' . $host ] ?? null;
+			if ( $spam ) {
+				$sessions  = max( 0, $sessions - $spam['sessions'] );
+				$users     = max( 0, $users - $spam['users'] );
+				$pageviews = max( 0, $pageviews - $spam['pageviews'] );
+			}
 
 			// Add the specific host data
 			$data[] = array(
@@ -1134,7 +1175,7 @@ class Meow_MWSEO_Modules_GoogleAnalytics
 			$page_title = $row['dimensionValues'][1]['value'];
 			$country    = isset( $row['dimensionValues'][2]['value'] ) ? $row['dimensionValues'][2]['value'] : '';
 			$host 	    = isset( $row['dimensionValues'][3]['value'] ) ? $row['dimensionValues'][3]['value'] : '';
-			if ( $this->is_noise_host( $host ) ) {
+			if ( $this->is_noise_host( $host ) || $this->is_spam_title( $page_title ) ) {
 				continue;
 			}
 
