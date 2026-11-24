@@ -270,6 +270,32 @@ class Meow_MWSEO_Score {
 		return $version;
 	}
 
+	// Why the last AI analysis failed, if it did (see ai_failed()).
+	private $ai_error = null;
+
+	/**
+	 * An AI check that failed: says so in the PHP error log and remembers why, then answers "NA".
+	 * These failures used to be swallowed, so a broken AI setup looked like a clean result.
+	 * Throwable, not Exception: a reply AI Engine cannot read raises a TypeError.
+	 */
+	private function ai_failed( $check, $error, $has_fallback = false ) {
+		$message = $error->getMessage();
+		error_log( 'SEO Engine AI check failed (' . $check . '): ' . $message );
+		// A check that falls back on its own result (readability, title match) still counts.
+		if ( !$has_fallback && !$this->ai_error ) {
+			$this->ai_error = $message;
+		}
+		return ['score' => 'NA', 'feedback' => ''];
+	}
+
+	/**
+	 * Why the last AI analysis or step failed, or null. The REST route uses it to tell the
+	 * screen, which otherwise only knew "AI step failed".
+	 */
+	public function get_ai_error() {
+		return $this->ai_error;
+	}
+
 	/**
 	 * AI analysis - semantic alignment, intent, summary, entities
 	 */
@@ -330,6 +356,8 @@ class Meow_MWSEO_Score {
 			$cached_ai_data['_cache_hit'] = true;
 			return $cached_ai_data;
 		}
+
+		$this->ai_error = null;
 
 		try {
 			// Generate summary and detect intent
@@ -398,8 +426,16 @@ class Meow_MWSEO_Score {
 				$ai_data['topic_feedback'] = $topic_result['feedback'];
 			}
 
-		} catch ( Exception $e ) {
-			error_log( 'SEO Engine AI Analysis Error: ' . $e->getMessage() );
+		} catch ( Throwable $e ) {
+			$this->ai_failed( 'analysis', $e );
+		}
+
+		// A failed analysis is not kept: cached for a week, the checks stayed "NA" long after the
+		// AI worked again (a provider outage, a model AI Engine could not read yet). The reason goes
+		// with the result, so the screen can say why instead of showing nothing.
+		if ( $this->ai_error ) {
+			$ai_data['ai_error'] = $this->ai_error;
+			return $ai_data;
 		}
 
 		// Cache the AI analysis results for 7 days (604800 seconds)
@@ -427,8 +463,9 @@ class Meow_MWSEO_Score {
 			// Ensure it's between 0 and 1
 			return max( 0.0, min( 1.0, $score ) );
 
-		} catch ( Exception $e ) {
+		} catch ( Throwable $e ) {
 			// Fallback: simple keyword overlap
+			$this->ai_failed( 'title match', $e, true );
 			return $this->simple_semantic_alignment( $analysis );
 		}
 	}
@@ -566,8 +603,8 @@ class Meow_MWSEO_Score {
 
 			return ['score' => 'NA', 'feedback' => ''];
 
-		} catch ( Exception $e ) {
-			return ['score' => 'NA', 'feedback' => ''];
+		} catch ( Throwable $e ) {
+			return $this->ai_failed( 'grammar', $e );
 		}
 	}
 
@@ -626,8 +663,8 @@ class Meow_MWSEO_Score {
 
 			return ['score' => 'NA', 'feedback' => ''];
 
-		} catch ( Exception $e ) {
-			return ['score' => 'NA', 'feedback' => ''];
+		} catch ( Throwable $e ) {
+			return $this->ai_failed( 'originality', $e );
 		}
 	}
 
@@ -674,8 +711,8 @@ class Meow_MWSEO_Score {
 
 			return ['score' => 'NA', 'feedback' => ''];
 
-		} catch ( Exception $e ) {
-			return ['score' => 'NA', 'feedback' => ''];
+		} catch ( Throwable $e ) {
+			return $this->ai_failed( 'engagement', $e );
 		}
 	}
 
@@ -722,7 +759,8 @@ class Meow_MWSEO_Score {
 
 			return $score;
 
-		} catch ( Exception $e ) {
+		} catch ( Throwable $e ) {
+			$this->ai_failed( 'structure', $e );
 			return 'NA';
 		}
 	}
@@ -774,8 +812,9 @@ class Meow_MWSEO_Score {
 				if ( $ai_line !== '' ) {
 					$feedback = $this->format_ai_feedback( trim( ( $feedback ? $feedback . ' ' : '' ) . $ai_line ) );
 				}
-			} catch ( Exception $e ) {
+			} catch ( Throwable $e ) {
 				// Fall back to module suggestions; non-fatal.
+				$this->ai_failed( 'readability', $e, true );
 			}
 		}
 
@@ -836,8 +875,8 @@ class Meow_MWSEO_Score {
 
 			return ['score' => 'NA', 'feedback' => ''];
 
-		} catch ( Exception $e ) {
-			return ['score' => 'NA', 'feedback' => ''];
+		} catch ( Throwable $e ) {
+			return $this->ai_failed( 'topic', $e );
 		}
 	}
 
@@ -2092,6 +2131,7 @@ class Meow_MWSEO_Score {
 
 		// Get current analysis data
 		$analysis = $this->analyze_post( $post );
+		$this->ai_error = null;
 
 		try {
 			switch ( $step ) {
@@ -2141,8 +2181,8 @@ class Meow_MWSEO_Score {
 				default:
 					return false;
 			}
-		} catch ( Exception $e ) {
-			error_log( 'SEO Engine AI Step Error (' . $step . '): ' . $e->getMessage() );
+		} catch ( Throwable $e ) {
+			$this->ai_failed( $step, $e );
 			return false;
 		}
 	}

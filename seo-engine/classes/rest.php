@@ -4068,11 +4068,14 @@ class Meow_MWSEO_Rest
 			// Run the AI step
 			$step_result = $mwseo_score->run_ai_step( $post, $step );
 
-			if ( $step_result === false ) {
+			// A check that failed inside its step answers "NA" instead of failing the step: it is
+			// a failure all the same, and merging it would store "NA" as if it were a result.
+			$ai_error = $mwseo_score->get_ai_error();
+			if ( $step_result === false || $ai_error ) {
 				return new WP_REST_Response( [
 					'success' => false,
 					'code' => 'ai_error',
-					'message' => 'AI step failed',
+					'message' => $ai_error ? $ai_error : 'AI step failed',
 					'step' => $step
 				], 200 ); // Return 200 so client can decide to retry or skip
 			}

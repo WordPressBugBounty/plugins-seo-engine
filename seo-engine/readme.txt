@@ -4,7 +4,7 @@ Tags: seo, redirection, sitemap, schema, analytics
 Donate link: https://www.patreon.com/meowapps
 Requires at least: 6.0
 Tested up to: 7.1
-Stable tag: 1.0.4
+Stable tag: 1.0.5
 Requires PHP: 8.1
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
@@ -299,6 +299,11 @@ No. The Redirections & 404 module handles URL redirects (301, 302, 307, 308, 410
 Yes, and it is fully automatic. When you publish or update a post, SEO Engine instantly notifies Bing, Yandex, Naver and every IndexNow-compatible engine, so your content gets crawled right away instead of waiting. The verification key is generated and served for you; there is nothing to configure. Note that Google does not use IndexNow and keeps reading your sitemap instead.
 
 == Changelog ==
+
+= 1.0.5 (2026/11/24) =
+* Add: The analysis now lists which AI checks could not run and the reason.
+* Update: A failed AI check is retried then skipped instead of stopping the whole analysis.
+* Fix: Failed AI checks are no longer kept in the cache for a week, and their reason is now logged (thanks Quentin Le Duff).
 
 = 1.0.4 (2026/11/22) =
 * Fix: Referral spam entries, the pages whose title is just another domain, are now excluded from Google Analytics visits.
